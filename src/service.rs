@@ -1,8 +1,9 @@
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::{ctx::SharedCtx, msg::P2pServiceId, stream::P2pQuicStream, PeerAddress};
+use crate::{ctx::SharedCtx, msg::P2pServiceId, router::SharedRouterTable, stream::P2pQuicStream, PeerAddress};
 
 pub mod alias_service;
+pub mod visualization_service;
 
 const SERVICE_CHANNEL_SIZE: usize = 10;
 
@@ -58,6 +59,10 @@ impl P2pService {
         self.ctx.open_stream(self.service, dest, meta).await
     }
 
+    pub fn router(&self) -> &SharedRouterTable {
+        self.ctx.router()
+    }
+
     pub async fn recv(&mut self) -> Option<P2pServiceEvent> {
         self.rx.recv().await
     }
@@ -82,5 +87,9 @@ impl P2pServiceRequester {
 
     pub async fn open_stream(&self, dest: PeerAddress, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
         self.ctx.open_stream(self.service, dest, meta).await
+    }
+
+    pub fn router(&self) -> &SharedRouterTable {
+        self.ctx.router()
     }
 }

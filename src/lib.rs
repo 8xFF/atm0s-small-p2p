@@ -8,7 +8,7 @@ use msg::{P2pServiceId, PeerMessage};
 use neighbours::NetworkNeighbours;
 use peer::PeerConnection;
 use quinn::{Endpoint, Incoming, VarInt};
-use router::{RouterTableSync, SharedRouterTable};
+use router::RouterTableSync;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -37,6 +37,7 @@ mod tests;
 mod utils;
 
 pub use requester::P2pNetworkRequester;
+pub use router::SharedRouterTable;
 pub use service::*;
 pub use stream::P2pQuicStream;
 pub use utils::*;

@@ -41,14 +41,14 @@ pub enum RouteAction {
 }
 
 #[derive(Debug)]
-pub struct RouterTable {
+struct RouterTable {
     address: PeerAddress,
     peers: BTreeMap<PeerAddress, PeerMemory>,
     directs: BTreeMap<PeerAddress, PathMetric>,
 }
 
 impl RouterTable {
-    pub fn new(address: PeerAddress) -> Self {
+    fn new(address: PeerAddress) -> Self {
         Self {
             address,
             peers: Default::default(),
@@ -56,11 +56,11 @@ impl RouterTable {
         }
     }
 
-    pub fn local_address(&self) -> PeerAddress {
+    fn local_address(&self) -> PeerAddress {
         self.address
     }
 
-    pub fn create_sync(&self, dest: &PeerAddress) -> RouterTableSync {
+    fn create_sync(&self, dest: &PeerAddress) -> RouterTableSync {
         RouterTableSync(
             self.peers
                 .iter()
@@ -70,7 +70,7 @@ impl RouterTable {
         )
     }
 
-    pub fn apply_sync(&mut self, from: PeerAddress, sync: RouterTableSync) {
+    fn apply_sync(&mut self, from: PeerAddress, sync: RouterTableSync) {
         let direct_metric = self.directs.get(&from).expect("should have direct metric with apply_sync");
         // ensure we have memory for each sync paths
         for (peer, _) in sync.0.iter() {
@@ -109,14 +109,14 @@ impl RouterTable {
         self.peers.retain(|_k, v| v.best().is_some());
     }
 
-    pub fn set_direct(&mut self, from: PeerAddress, ttl_ms: u16) {
+    fn set_direct(&mut self, from: PeerAddress, ttl_ms: u16) {
         self.directs.insert(from, (1, ttl_ms).into());
         let memory = self.peers.entry(from).or_default();
         memory.paths.insert(from, PathMetric { relay_hops: 0, rtt_ms: ttl_ms });
         Self::select_best_for(&from, memory);
     }
 
-    pub fn del_direct(&mut self, from: &PeerAddress) {
+    fn del_direct(&mut self, from: &PeerAddress) {
         self.directs.remove(&from);
         if let Some(memory) = self.peers.get_mut(from) {
             memory.paths.remove(&from);
@@ -127,7 +127,7 @@ impl RouterTable {
         }
     }
 
-    pub fn action(&self, dest: &PeerAddress) -> Option<RouteAction> {
+    fn action(&self, dest: &PeerAddress) -> Option<RouteAction> {
         if self.address.eq(dest) {
             Some(RouteAction::Local)
         } else {
@@ -136,7 +136,7 @@ impl RouterTable {
     }
 
     /// Get next remote
-    pub fn next_remote(&self, next: &PeerAddress) -> Option<(PeerAddress, PathMetric)> {
+    fn next_remote(&self, next: &PeerAddress) -> Option<(PeerAddress, PathMetric)> {
         let memory = self.peers.get(next)?;
         let best = memory.best()?;
         let metric = memory.best_metric().expect("should have metric");
@@ -151,6 +151,10 @@ impl RouterTable {
                 metric.relay_hops
             );
         }
+    }
+
+    fn neighbours(&self) -> Vec<(PeerAddress, u16)> {
+        self.directs.iter().map(|(k, v)| (*k, v.rtt_ms)).collect()
     }
 }
 
@@ -239,6 +243,10 @@ impl SharedRouterTable {
 
     pub fn next_remote(&self, dest: &PeerAddress) -> Option<(PeerAddress, PathMetric)> {
         self.table.read().next_remote(dest)
+    }
+
+    pub fn neighbours(&self) -> Vec<(PeerAddress, u16)> {
+        self.table.read().neighbours()
     }
 }
 

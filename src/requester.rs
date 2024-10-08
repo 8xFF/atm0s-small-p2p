@@ -12,4 +12,8 @@ impl P2pNetworkRequester {
         self.control_tx.send(ControlCmd::Connect(addr, Some(tx))).expect("should send to main loop");
         rx.await?
     }
+
+    pub fn try_connect(&self, addr: PeerAddress) {
+        self.control_tx.send(ControlCmd::Connect(addr, None)).expect("should send to main loop");
+    }
 }
