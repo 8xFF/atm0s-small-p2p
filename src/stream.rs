@@ -7,10 +7,8 @@ use std::{
 
 use anyhow::anyhow;
 use serde::{de::DeserializeOwned, Serialize};
-use tokio_util::{
-    bytes::{Buf, BufMut},
-    codec::{Decoder, Encoder},
-};
+use tokio_util::codec::LengthDelimitedCodec;
+use tokio_util::codec::{Decoder, Encoder};
 
 use quinn::{RecvStream, SendStream};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -57,49 +55,54 @@ impl AsyncWrite for P2pQuicStream {
 }
 
 pub struct BincodeCodec<Item> {
+    length_decode: LengthDelimitedCodec,
     _tmp: PhantomData<Item>,
 }
 
 impl<Item> Default for BincodeCodec<Item> {
     fn default() -> Self {
-        Self { _tmp: Default::default() }
+        Self {
+            length_decode: LengthDelimitedCodec::default(),
+            _tmp: Default::default(),
+        }
     }
 }
 
 impl<Item: Serialize> Encoder<Item> for BincodeCodec<Item> {
-    type Error = bincode::Error;
+    type Error = std::io::Error;
 
     fn encode(&mut self, item: Item, dst: &mut tokio_util::bytes::BytesMut) -> Result<(), Self::Error> {
-        let res = bincode::serialize_into(dst.writer(), &item);
-        res
+        let data: Vec<u8> = bincode::serialize(&item).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bincode serialize failure"))?;
+        self.length_decode.encode(data.into(), dst)
     }
 }
 
 impl<Item: DeserializeOwned + Debug> Decoder for BincodeCodec<Item> {
-    type Error = bincode::Error;
+    type Error = std::io::Error;
     type Item = Item;
 
     fn decode(&mut self, src: &mut tokio_util::bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.is_empty() {
-            return Result::<_, Self::Error>::Ok(Option::<Self::Item>::None);
+        match self.length_decode.decode(src)? {
+            Some(buf) => Ok(Some(
+                bincode::deserialize(&buf).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "bincode deserialize failure"))?,
+            )),
+            None => Ok(None),
         }
-        let res = bincode::deserialize_from::<_, Item>(src.reader()).map(|o| Some(o));
-        res
     }
 }
 
 pub async fn wait_object<R: AsyncRead + Unpin, O: DeserializeOwned, const MAX_SIZE: usize>(reader: &mut R) -> anyhow::Result<O> {
     let mut len_buf = [0; 2];
     let mut data_buf = [0; MAX_SIZE];
-    reader.read_exact(&mut len_buf).await?;
+    reader.read_exact(&mut len_buf).await.unwrap();
     let handshake_len = u16::from_be_bytes([len_buf[0], len_buf[1]]) as usize;
     if handshake_len > data_buf.len() {
         return Err(anyhow!("packet to big {} vs {MAX_SIZE}", data_buf.len()));
     }
 
-    reader.read_exact(&mut data_buf[0..handshake_len]).await?;
+    reader.read_exact(&mut data_buf[0..handshake_len]).await.unwrap();
 
-    Ok(bincode::deserialize(&data_buf[0..handshake_len])?)
+    Ok(bincode::deserialize(&data_buf[0..handshake_len]).unwrap())
 }
 
 pub async fn write_object<W: AsyncWrite + Send + Unpin, O: Serialize, const MAX_SIZE: usize>(writer: &mut W, object: &O) -> anyhow::Result<()> {
@@ -109,7 +112,7 @@ pub async fn write_object<W: AsyncWrite + Send + Unpin, O: Serialize, const MAX_
     }
     let len_buf = (data_buf.len() as u16).to_be_bytes();
 
-    writer.write_all(&len_buf).await?;
-    writer.write_all(&data_buf).await?;
+    writer.write_all(&len_buf).await.unwrap();
+    writer.write_all(&data_buf).await.unwrap();
     Ok(())
 }
