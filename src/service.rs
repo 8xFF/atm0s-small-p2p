@@ -13,6 +13,7 @@ pub enum P2pServiceEvent {
     Stream(PeerAddress, Vec<u8>, P2pQuicStream),
 }
 
+#[derive(Debug, Clone)]
 pub struct P2pServiceRequester {
     service: P2pServiceId,
     ctx: SharedCtx,

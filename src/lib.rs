@@ -38,6 +38,7 @@ mod utils;
 
 pub use requester::P2pNetworkRequester;
 pub use service::*;
+pub use stream::P2pQuicStream;
 pub use utils::*;
 
 #[derive(Debug, Display, Clone, Copy, From, Deref, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
