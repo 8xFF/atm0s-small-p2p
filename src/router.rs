@@ -9,7 +9,9 @@ use std::{collections::BTreeMap, ops::AddAssign, sync::Arc};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use super::PeerAddress;
+use crate::ConnectionId;
+
+use super::PeerId;
 
 const MAX_HOPS: u8 = 6;
 
@@ -26,41 +28,41 @@ impl From<(u8, u16)> for PathMetric {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RouterTableSync(Vec<(PeerAddress, PathMetric)>);
+pub struct RouterTableSync(Vec<(PeerId, PathMetric)>);
 
 #[derive(Debug, Default)]
 struct PeerMemory {
-    best: Option<PeerAddress>,
-    paths: BTreeMap<PeerAddress, PathMetric>,
+    best: Option<ConnectionId>,
+    paths: BTreeMap<ConnectionId, PathMetric>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RouteAction {
     Local,
-    Next(PeerAddress),
+    Next(ConnectionId),
 }
 
 #[derive(Debug)]
 struct RouterTable {
-    address: PeerAddress,
-    peers: BTreeMap<PeerAddress, PeerMemory>,
-    directs: BTreeMap<PeerAddress, PathMetric>,
+    peer_id: PeerId,
+    peers: BTreeMap<PeerId, PeerMemory>,
+    directs: BTreeMap<ConnectionId, (PeerId, PathMetric)>,
 }
 
 impl RouterTable {
-    fn new(address: PeerAddress) -> Self {
+    fn new(peer_id: PeerId) -> Self {
         Self {
-            address,
+            peer_id,
             peers: Default::default(),
             directs: Default::default(),
         }
     }
 
-    fn local_address(&self) -> PeerAddress {
-        self.address
+    fn local_id(&self) -> PeerId {
+        self.peer_id
     }
 
-    fn create_sync(&self, dest: &PeerAddress) -> RouterTableSync {
+    fn create_sync(&self, dest: &PeerId) -> RouterTableSync {
         RouterTableSync(
             self.peers
                 .iter()
@@ -70,36 +72,36 @@ impl RouterTable {
         )
     }
 
-    fn apply_sync(&mut self, from: PeerAddress, sync: RouterTableSync) {
-        let direct_metric = self.directs.get(&from).expect("should have direct metric with apply_sync");
+    fn apply_sync(&mut self, conn: ConnectionId, sync: RouterTableSync) {
+        let (from_peer, direct_metric) = self.directs.get(&conn).expect("should have direct metric with apply_sync");
         // ensure we have memory for each sync paths
         for (peer, _) in sync.0.iter() {
             self.peers.entry(*peer).or_default();
         }
 
-        let mut new_paths = BTreeMap::<PeerAddress, PathMetric>::from_iter(sync.0.into_iter());
+        let mut new_paths = BTreeMap::<PeerId, PathMetric>::from_iter(sync.0.into_iter());
         // only loop over peer which don't equal source, because it is direct connection
-        for (peer, memory) in self.peers.iter_mut().filter(|(p, _)| !from.eq(p)) {
-            let previous = memory.paths.contains_key(&from);
+        for (peer, memory) in self.peers.iter_mut().filter(|(p, _)| !from_peer.eq(p)) {
+            let previous = memory.paths.contains_key(&conn);
             let current = new_paths.remove(peer);
             match (previous, current) {
                 (true, Some(mut new_metric)) => {
                     // has update
                     new_metric += *direct_metric;
-                    memory.paths.insert(from, new_metric);
+                    memory.paths.insert(conn, new_metric);
                     Self::select_best_for(peer, memory);
                 }
                 (true, None) => {
                     // delete
                     log::info!("[RouterTable] remove path for {peer}");
-                    memory.paths.remove(&from);
+                    memory.paths.remove(&conn);
                     Self::select_best_for(peer, memory);
                 }
                 (false, Some(mut new_metric)) => {
                     // new create
                     log::info!("[RouterTable] create path for {peer}");
                     new_metric += *direct_metric;
-                    memory.paths.insert(from, new_metric);
+                    memory.paths.insert(conn, new_metric);
                     Self::select_best_for(peer, memory);
                 }
                 _ => { //dont changed
@@ -109,26 +111,27 @@ impl RouterTable {
         self.peers.retain(|_k, v| v.best().is_some());
     }
 
-    fn set_direct(&mut self, from: PeerAddress, ttl_ms: u16) {
-        self.directs.insert(from, (1, ttl_ms).into());
-        let memory = self.peers.entry(from).or_default();
-        memory.paths.insert(from, PathMetric { relay_hops: 0, rtt_ms: ttl_ms });
-        Self::select_best_for(&from, memory);
+    fn set_direct(&mut self, conn: ConnectionId, to: PeerId, ttl_ms: u16) {
+        self.directs.insert(conn, (to, (1, ttl_ms).into()));
+        let memory = self.peers.entry(to).or_default();
+        memory.paths.insert(conn, PathMetric { relay_hops: 0, rtt_ms: ttl_ms });
+        Self::select_best_for(&to, memory);
     }
 
-    fn del_direct(&mut self, from: &PeerAddress) {
-        self.directs.remove(&from);
-        if let Some(memory) = self.peers.get_mut(from) {
-            memory.paths.remove(&from);
-            Self::select_best_for(&from, memory);
-            if memory.best().is_none() {
-                self.peers.remove(&from);
+    fn del_direct(&mut self, conn: &ConnectionId) {
+        if let Some((to, _)) = self.directs.remove(conn) {
+            if let Some(memory) = self.peers.get_mut(&to) {
+                memory.paths.remove(&conn);
+                Self::select_best_for(&to, memory);
+                if memory.best().is_none() {
+                    self.peers.remove(&to);
+                }
             }
         }
     }
 
-    fn action(&self, dest: &PeerAddress) -> Option<RouteAction> {
-        if self.address.eq(dest) {
+    fn action(&self, dest: &PeerId) -> Option<RouteAction> {
+        if self.peer_id.eq(dest) {
             Some(RouteAction::Local)
         } else {
             self.peers.get(dest)?.best().map(RouteAction::Next)
@@ -136,14 +139,14 @@ impl RouterTable {
     }
 
     /// Get next remote
-    fn next_remote(&self, next: &PeerAddress) -> Option<(PeerAddress, PathMetric)> {
+    fn next_remote(&self, next: &PeerId) -> Option<(ConnectionId, PathMetric)> {
         let memory = self.peers.get(next)?;
         let best = memory.best()?;
         let metric = memory.best_metric().expect("should have metric");
         Some((best, metric))
     }
 
-    fn select_best_for(dest: &PeerAddress, memory: &mut PeerMemory) {
+    fn select_best_for(dest: &PeerId, memory: &mut PeerMemory) {
         if let Some((new_best, metric)) = memory.select_best() {
             log::info!(
                 "[RouterTable] to {dest} select new path over {new_best} with rtt {} ms over {} hop(s)",
@@ -153,8 +156,8 @@ impl RouterTable {
         }
     }
 
-    fn neighbours(&self) -> Vec<(PeerAddress, u16)> {
-        self.directs.iter().map(|(k, v)| (*k, v.rtt_ms)).collect()
+    fn neighbours(&self) -> Vec<(ConnectionId, PeerId, u16)> {
+        self.directs.iter().map(|(k, (peer, v))| (*k, *peer, v.rtt_ms)).collect()
     }
 }
 
@@ -172,7 +175,7 @@ impl AddAssign for PathMetric {
 }
 
 impl PeerMemory {
-    fn best(&self) -> Option<PeerAddress> {
+    fn best(&self) -> Option<ConnectionId> {
         self.best
     }
 
@@ -180,7 +183,7 @@ impl PeerMemory {
         self.best.map(|p| *self.paths.get(&p).expect("should have metric with best path"))
     }
 
-    fn select_best(&mut self) -> Option<(PeerAddress, PathMetric)> {
+    fn select_best(&mut self) -> Option<(ConnectionId, PathMetric)> {
         let previous = self.best;
         self.best = None;
         let mut iter = self.paths.iter();
@@ -211,75 +214,72 @@ pub struct SharedRouterTable {
 }
 
 impl SharedRouterTable {
-    pub fn new(address: PeerAddress) -> Self {
+    pub fn new(address: PeerId) -> Self {
         Self {
             table: Arc::new(RwLock::new(RouterTable::new(address))),
         }
     }
 
-    pub fn local_address(&self) -> PeerAddress {
-        self.table.read().local_address()
+    pub fn local_id(&self) -> PeerId {
+        self.table.read().local_id()
     }
 
-    pub fn create_sync(&self, dest: &PeerAddress) -> RouterTableSync {
+    pub fn create_sync(&self, dest: &PeerId) -> RouterTableSync {
         self.table.read().create_sync(&dest)
     }
 
-    pub fn apply_sync(&self, from: PeerAddress, sync: RouterTableSync) {
-        self.table.write().apply_sync(from, sync);
+    pub fn apply_sync(&self, conn: ConnectionId, sync: RouterTableSync) {
+        self.table.write().apply_sync(conn, sync);
     }
 
-    pub fn set_direct(&self, from: PeerAddress, ttl_ms: u16) {
-        self.table.write().set_direct(from, ttl_ms);
+    pub fn set_direct(&self, conn: ConnectionId, to: PeerId, ttl_ms: u16) {
+        self.table.write().set_direct(conn, to, ttl_ms);
     }
 
-    pub fn del_direct(&self, from: &PeerAddress) {
-        self.table.write().del_direct(from);
+    pub fn del_direct(&self, conn: &ConnectionId) {
+        self.table.write().del_direct(conn);
     }
 
-    pub fn action(&self, dest: &PeerAddress) -> Option<RouteAction> {
+    pub fn action(&self, dest: &PeerId) -> Option<RouteAction> {
         self.table.read().action(dest)
     }
 
-    pub fn next_remote(&self, dest: &PeerAddress) -> Option<(PeerAddress, PathMetric)> {
+    pub fn next_remote(&self, dest: &PeerId) -> Option<(ConnectionId, PathMetric)> {
         self.table.read().next_remote(dest)
     }
 
-    pub fn neighbours(&self) -> Vec<(PeerAddress, u16)> {
+    pub fn neighbours(&self) -> Vec<(ConnectionId, PeerId, u16)> {
         self.table.read().neighbours()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{router::RouterTableSync, PeerAddress};
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use crate::{router::RouterTableSync, ConnectionId, PeerId};
 
     use super::{RouteAction, RouterTable, MAX_HOPS};
 
-    fn create_peer(i: u16) -> PeerAddress {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), i).into()
-    }
-
     #[test_log::test]
     fn route_local() {
-        let table = RouterTable::new(create_peer(0));
-        assert_eq!(table.action(&create_peer(0)), Some(RouteAction::Local));
+        let table = RouterTable::new(PeerId(0));
+        assert_eq!(table.action(&PeerId(0)), Some(RouteAction::Local));
     }
 
     #[test_log::test]
     fn create_correct_direct_sync() {
-        let mut table = RouterTable::new(create_peer(0));
+        let mut table = RouterTable::new(PeerId(0));
 
-        let peer1 = create_peer(1);
-        let peer2 = create_peer(2);
-        let peer3 = create_peer(3);
+        let peer1 = PeerId(1);
+        let conn1 = ConnectionId(1);
+        let peer2 = PeerId(2);
+        let conn2 = ConnectionId(2);
+        let peer3 = PeerId(3);
 
-        table.set_direct(peer1, 100);
-        table.set_direct(peer2, 200);
+        table.set_direct(conn1, peer1, 100);
+        table.set_direct(conn2, peer2, 200);
 
-        assert_eq!(table.next_remote(&peer1), Some((peer1, (0, 100).into())));
-        assert_eq!(table.next_remote(&peer2), Some((peer2, (0, 200).into())));
+        assert_eq!(table.next_remote(&peer1), Some((conn1, (0, 100).into())));
+        assert_eq!(table.next_remote(&peer2), Some((conn2, (0, 200).into())));
         assert_eq!(table.next_remote(&peer3), None);
 
         assert_eq!(table.create_sync(&peer1), RouterTableSync(vec![(peer2, (0, 200).into())]));
@@ -288,21 +288,23 @@ mod tests {
 
     #[test_log::test]
     fn apply_correct_direct_sync() {
-        let mut table = RouterTable::new(create_peer(0));
+        let mut table = RouterTable::new(PeerId(0));
 
-        let peer1 = create_peer(1);
-        let peer2 = create_peer(2);
-        let peer3 = create_peer(3);
-        let peer4 = create_peer(4);
+        let peer1 = PeerId(1);
+        let conn1 = ConnectionId(1);
+        let peer2 = PeerId(2);
+        let peer3 = PeerId(3);
+        let peer4 = PeerId(4);
+        let conn4 = ConnectionId(4);
 
-        table.set_direct(peer1, 100);
-        table.set_direct(peer4, 400);
+        table.set_direct(conn1, peer1, 100);
+        table.set_direct(conn4, peer4, 400);
 
-        table.apply_sync(peer1, RouterTableSync(vec![(peer2, (0, 200).into())]));
+        table.apply_sync(conn1, RouterTableSync(vec![(peer2, (0, 200).into())]));
 
         // now we have NODO => peer1 => peer2
-        assert_eq!(table.next_remote(&peer1), Some((peer1, (0, 100).into())));
-        assert_eq!(table.next_remote(&peer2), Some((peer1, (1, 300).into())));
+        assert_eq!(table.next_remote(&peer1), Some((conn1, (0, 100).into())));
+        assert_eq!(table.next_remote(&peer2), Some((conn1, (1, 300).into())));
         assert_eq!(table.next_remote(&peer3), None);
 
         // we seems to have loop with peer2 here but it will not effect to routing because we have direct connection, it will always has lower rtt
@@ -312,17 +314,19 @@ mod tests {
 
     #[test_log::test]
     fn dont_create_sync_over_max_hops() {
-        let mut table = RouterTable::new(create_peer(0));
+        let mut table = RouterTable::new(PeerId(0));
 
-        let peer1 = create_peer(1);
-        let peer2 = create_peer(2);
-        let peer3 = create_peer(3);
+        let peer1 = PeerId(1);
+        let conn1 = ConnectionId(1);
+        let peer2 = PeerId(2);
+        let peer3 = PeerId(3);
+        let conn3 = ConnectionId(3);
 
-        table.set_direct(peer1, 100);
-        table.set_direct(peer3, 300);
+        table.set_direct(conn1, peer1, 100);
+        table.set_direct(conn3, peer3, 300);
 
-        table.apply_sync(peer1, RouterTableSync(vec![(peer2, (MAX_HOPS, 200).into())]));
-        assert_eq!(table.next_remote(&peer2), Some((peer1, (MAX_HOPS + 1, 300).into())));
+        table.apply_sync(conn1, RouterTableSync(vec![(peer2, (MAX_HOPS, 200).into())]));
+        assert_eq!(table.next_remote(&peer2), Some((conn1, (MAX_HOPS + 1, 300).into())));
 
         // we shouldn't create sync with peer2 because it over MAX_HOPS
         assert_eq!(table.create_sync(&peer3), RouterTableSync(vec![(peer1, (0, 100).into())]));

@@ -6,26 +6,26 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tokio::{select, time::Interval};
 
-use crate::{now_ms, ErrorExt, PeerAddress};
+use crate::{now_ms, ConnectionId, ErrorExt, PeerId};
 
 use super::{P2pService, P2pServiceEvent};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum VisualizationServiceEvent {
-    PeerJoined(PeerAddress, Vec<(PeerAddress, u16)>),
-    PeerUpdated(PeerAddress, Vec<(PeerAddress, u16)>),
-    PeerLeaved(PeerAddress),
+    PeerJoined(PeerId, Vec<(ConnectionId, PeerId, u16)>),
+    PeerUpdated(PeerId, Vec<(ConnectionId, PeerId, u16)>),
+    PeerLeaved(PeerId),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 enum Message {
     Scan,
-    Info(Vec<(PeerAddress, u16)>),
+    Info(Vec<(ConnectionId, PeerId, u16)>),
 }
 
 pub struct VisualizationService {
     service: P2pService,
-    neighbours: HashMap<PeerAddress, u64>,
+    neighbours: HashMap<PeerId, u64>,
     ticker: Interval,
     collect_interval: Option<Duration>,
     collect_me: bool,
@@ -42,7 +42,7 @@ impl VisualizationService {
             collect_me,
             neighbours: HashMap::new(),
             outs: if collect_me {
-                VecDeque::from([VisualizationServiceEvent::PeerJoined(service.router().local_address(), vec![])])
+                VecDeque::from([VisualizationServiceEvent::PeerJoined(service.router().local_id(), vec![])])
             } else {
                 VecDeque::new()
             },
@@ -61,7 +61,7 @@ impl VisualizationService {
                     if let Some(interval) = self.collect_interval {
                         if self.collect_me {
                             // for update local node
-                            self.outs.push_back(VisualizationServiceEvent::PeerUpdated(self.service.router().local_address(), self.service.router().neighbours()));
+                            self.outs.push_back(VisualizationServiceEvent::PeerUpdated(self.service.router().local_id(), self.service.router().neighbours()));
                         }
 
                         let requester = self.service.requester();
@@ -89,7 +89,7 @@ impl VisualizationService {
                             match msg {
                                 Message::Scan => {
                                     let requester = self.service.requester();
-                                    let neighbours: Vec<(PeerAddress, u16)> = requester.router().neighbours();
+                                    let neighbours = requester.router().neighbours();
                                     tokio::spawn(async move {
                                         requester
                                             .send_unicast(from, bincode::serialize(&Message::Info(neighbours)).expect("should convert to buf"))

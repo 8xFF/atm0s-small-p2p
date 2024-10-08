@@ -19,7 +19,7 @@ use tokio::{
 use crate::{
     stream::P2pQuicStream,
     utils::{now_ms, ErrorExt, ErrorExt2},
-    PeerAddress,
+    PeerId,
 };
 
 use super::{P2pService, P2pServiceEvent, P2pServiceRequester};
@@ -34,8 +34,8 @@ pub struct AliasId(u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AliasFoundLocation {
     Local,
-    Hint(PeerAddress),
-    Scan(PeerAddress),
+    Hint(PeerId),
+    Scan(PeerId),
 }
 
 pub enum AliasStreamLocation {
@@ -114,7 +114,7 @@ impl AliasServiceRequester {
 }
 
 enum FindRequestState {
-    CheckHint(u64, HashSet<PeerAddress>),
+    CheckHint(u64, HashSet<PeerId>),
     Scan(u64),
 }
 
@@ -126,12 +126,12 @@ struct FindRequest {
 #[derive(Debug, PartialEq, Eq)]
 enum InternalOutput {
     Broadcast(AliasMessage),
-    Unicast(PeerAddress, AliasMessage),
+    Unicast(PeerId, AliasMessage),
 }
 
 struct AliasServiceInternal {
     local: HashMap<AliasId, u8>,
-    cache: LruCache<AliasId, HashSet<PeerAddress>>,
+    cache: LruCache<AliasId, HashSet<PeerId>>,
     find_reqs: HashMap<AliasId, FindRequest>,
     outs: VecDeque<InternalOutput>,
 }
@@ -198,7 +198,7 @@ impl AliasService {
         self.pop_internal().await;
     }
 
-    async fn on_msg(&mut self, from: PeerAddress, msg: AliasMessage) {
+    async fn on_msg(&mut self, from: PeerId, msg: AliasMessage) {
         log::debug!("[AliasService] on msg from {from}, {msg:?}");
         self.internal.on_msg(now_ms(), from, msg);
         self.pop_internal().await;
@@ -252,7 +252,7 @@ impl AliasServiceInternal {
         }
     }
 
-    fn on_msg(&mut self, now: u64, from: PeerAddress, msg: AliasMessage) {
+    fn on_msg(&mut self, now: u64, from: PeerId, msg: AliasMessage) {
         match msg {
             AliasMessage::NotifySet(alias_id) => {
                 let slot = self.cache.get_or_insert_mut(alias_id, || HashSet::new());
@@ -491,7 +491,7 @@ mod test {
     fn test_find_cached_alias_found() {
         let mut ctx = TestContext::new();
         let alias_id = AliasId(1);
-        let peer_addr = PeerAddress("127.0.0.1:1".parse().expect(""));
+        let peer_addr = PeerId(1);
 
         // Add alias to cache
         ctx.internal.on_msg(ctx.now, peer_addr, AliasMessage::NotifySet(alias_id));
@@ -518,7 +518,7 @@ mod test {
     fn test_find_cached_alias_not_found() {
         let mut ctx = TestContext::new();
         let alias_id = AliasId(1);
-        let peer_addr = PeerAddress("127.0.0.1:1".parse().expect(""));
+        let peer_addr = PeerId(1);
 
         // Add alias to cache
         ctx.internal.on_msg(ctx.now, peer_addr, AliasMessage::NotifySet(alias_id));
@@ -569,7 +569,7 @@ mod test {
     fn test_shutdown() {
         let mut ctx = TestContext::new();
         let alias_id = AliasId(1);
-        let peer_addr = PeerAddress("127.0.0.1:1".parse().expect(""));
+        let peer_addr = PeerId(1);
 
         // Add some data to cache
         let mut peers = HashSet::new();

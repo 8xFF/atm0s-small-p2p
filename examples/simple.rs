@@ -1,6 +1,6 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, str::FromStr, time::Duration};
 
-use atm0s_small_p2p::{P2pNetwork, P2pNetworkConfig};
+use atm0s_small_p2p::{P2pNetwork, P2pNetworkConfig, PeerAddress};
 use clap::Parser;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -13,12 +13,16 @@ pub const DEFAULT_CLUSTER_KEY: &[u8] = include_bytes!("../certs/dev.cluster.key"
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// UDP/TCP port for serving QUIC/TCP connection for SDN network
-    #[arg(env, long, default_value = "127.0.0.1:11111")]
+    #[arg(env, long, default_value_t = 1)]
+    sdn_peer_id: u64,
+
+    /// UDP/TCP port for serving QUIC/TCP connection for SDN network
+    #[arg(env, long, default_value = "0.0.0.0:11111")]
     sdn_listener: SocketAddr,
 
     /// Seeds
     #[arg(env, long, value_delimiter = ',')]
-    sdn_seeds: Vec<SocketAddr>,
+    sdn_seeds: Vec<String>,
 
     /// Allow it broadcast address to other peers
     /// This allows other peer can active connect to this node
@@ -44,8 +48,9 @@ async fn main() {
     let cert = CertificateDer::from(DEFAULT_CLUSTER_CERT.to_vec());
 
     let mut p2p = P2pNetwork::new(P2pNetworkConfig {
-        addr: args.sdn_listener,
-        advertise: args.sdn_advertise_address,
+        peer_id: args.sdn_peer_id.into(),
+        listen_addr: args.sdn_listener,
+        advertise: args.sdn_advertise_address.map(|a| a.into()),
         priv_key: key,
         cert: cert,
         tick_ms: 100,
@@ -53,11 +58,13 @@ async fn main() {
     .await
     .expect("should create network");
 
+    let sdn_seeds = args.sdn_seeds.into_iter().map(|s| PeerAddress::from_str(s.as_str()).expect("should parse address")).collect::<Vec<_>>();
+
     let requester = p2p.requester();
     tokio::spawn(async move {
         loop {
-            for seed in &args.sdn_seeds {
-                requester.try_connect((*seed).into());
+            for seed in &sdn_seeds {
+                requester.try_connect(seed.clone());
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }

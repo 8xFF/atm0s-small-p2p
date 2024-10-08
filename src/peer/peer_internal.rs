@@ -5,6 +5,8 @@
 //! - Only use async with current connection stream
 //! - For other communication shoud use try_send for avoding blocking
 
+use std::net::SocketAddr;
+
 use anyhow::anyhow;
 use futures::{SinkExt, StreamExt};
 use quinn::{Connection, RecvStream, SendStream};
@@ -21,14 +23,16 @@ use crate::{
     router::RouteAction,
     stream::{wait_object, write_object, BincodeCodec, P2pQuicStream},
     utils::ErrorExt,
-    InternalEvent, P2pServiceEvent, PeerAddress, PeerMainData,
+    ConnectionId, InternalEvent, P2pServiceEvent, PeerId, PeerMainData,
 };
 
 use super::PeerConnectionControl;
 
 pub struct PeerConnectionInternal {
+    conn_id: ConnectionId,
+    to_id: PeerId,
     ctx: SharedCtx,
-    remote: PeerAddress,
+    remote: SocketAddr,
     connection: Connection,
     framed: Framed<P2pQuicStream, BincodeCodec<PeerMessage>>,
     internal_tx: Sender<InternalEvent>,
@@ -36,21 +40,28 @@ pub struct PeerConnectionInternal {
 }
 
 impl PeerConnectionInternal {
-    pub fn new(ctx: SharedCtx, connection: Connection, main_send: SendStream, main_recv: RecvStream, internal_tx: Sender<InternalEvent>, control_rx: Receiver<PeerConnectionControl>) -> Self {
+    pub fn new(
+        ctx: SharedCtx,
+        conn_id: ConnectionId,
+        to_id: PeerId,
+        connection: Connection,
+        main_send: SendStream,
+        main_recv: RecvStream,
+        internal_tx: Sender<InternalEvent>,
+        control_rx: Receiver<PeerConnectionControl>,
+    ) -> Self {
         let stream = P2pQuicStream::new(main_recv, main_send);
 
         Self {
+            conn_id,
+            to_id,
             ctx,
-            remote: connection.remote_address().into(),
+            remote: connection.remote_address(),
             connection,
             framed: Framed::new(stream, BincodeCodec::default()),
             internal_tx,
             control_rx,
         }
-    }
-
-    pub async fn start(&mut self) -> anyhow::Result<()> {
-        Ok(self.framed.send(PeerMessage::Hello {}).await?)
     }
 
     pub async fn recv_complex(&mut self) -> anyhow::Result<()> {
@@ -74,7 +85,7 @@ impl PeerConnectionInternal {
     async fn on_accept_bi(&mut self, send: SendStream, recv: RecvStream) -> anyhow::Result<()> {
         log::info!("[PeerConnectionInternal {}] on new bi", self.remote);
         let stream = P2pQuicStream::new(recv, send);
-        tokio::spawn(accept_bi(self.remote, stream, self.ctx.clone()));
+        tokio::spawn(accept_bi(self.to_id, stream, self.ctx.clone()));
         Ok(())
     }
 
@@ -101,18 +112,15 @@ impl PeerConnectionInternal {
 
     async fn on_msg(&mut self, msg: PeerMessage) -> anyhow::Result<()> {
         match msg {
-            PeerMessage::Hello {} => {
-                log::info!("[PeerConnectionInternal {}] on hello", self.remote);
-            }
             PeerMessage::Sync { route, advertise } => {
-                if let Err(_e) = self.internal_tx.try_send(InternalEvent::PeerData(self.remote, PeerMainData::Sync { route, advertise })) {
+                if let Err(_e) = self.internal_tx.try_send(InternalEvent::PeerData(self.conn_id, self.to_id, PeerMainData::Sync { route, advertise })) {
                     log::warn!("[PeerConnectionInternal {}] queue main loop full", self.remote);
                 }
             }
             PeerMessage::Broadcast(source, service_id, msg_id, data) => {
                 if self.ctx.check_broadcast_msg(msg_id) {
-                    for peer in self.ctx.peers().into_iter().filter(|p| !self.remote.eq(&p.address())) {
-                        peer.try_send(PeerMessage::Broadcast(source, service_id, msg_id, data.clone()))
+                    for conn in self.ctx.conns().into_iter().filter(|p| !self.to_id.eq(&p.to_id())) {
+                        conn.try_send(PeerMessage::Broadcast(source, service_id, msg_id, data.clone()))
                             .print_on_err("[PeerConnectionInternal] broadcast data over peer alias");
                     }
 
@@ -135,8 +143,8 @@ impl PeerConnectionInternal {
                     }
                 }
                 Some(RouteAction::Next(next)) => {
-                    if let Some(peer) = self.ctx.peer(&next) {
-                        peer.try_send(PeerMessage::Unicast(source, dest, service_id, data))
+                    if let Some(conn) = self.ctx.conn(&next) {
+                        conn.try_send(PeerMessage::Unicast(source, dest, service_id, data))
                             .print_on_err("[PeerConnectionInternal] send data over peer alias");
                     } else {
                         log::warn!("[PeerConnectionInternal {}] peer {next} not found", self.remote);
@@ -151,7 +159,7 @@ impl PeerConnectionInternal {
     }
 }
 
-async fn open_bi(connection: Connection, source: PeerAddress, dest: PeerAddress, service: P2pServiceId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
+async fn open_bi(connection: Connection, source: PeerId, dest: PeerId, service: P2pServiceId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
     let (send, recv) = connection.open_bi().await?;
     let mut stream = P2pQuicStream::new(recv, send);
     write_object::<_, _, 500>(&mut stream, &StreamConnectReq { source, dest, service, meta }).await?;
@@ -159,13 +167,13 @@ async fn open_bi(connection: Connection, source: PeerAddress, dest: PeerAddress,
     res.map(|_| stream).map_err(|e| anyhow!("{e}"))
 }
 
-async fn accept_bi(remote: PeerAddress, mut stream: P2pQuicStream, ctx: SharedCtx) -> anyhow::Result<()> {
+async fn accept_bi(to_peer: PeerId, mut stream: P2pQuicStream, ctx: SharedCtx) -> anyhow::Result<()> {
     let req = wait_object::<_, StreamConnectReq, 500>(&mut stream).await?;
     let StreamConnectReq { dest, source, service, meta } = req;
     match ctx.router().action(&dest) {
         Some(RouteAction::Local) => {
             if let Some(service_tx) = ctx.get_service(&service) {
-                log::info!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} => process local");
+                log::info!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} => process local");
                 write_object::<_, _, 500>(&mut stream, &Ok::<_, String>(())).await?;
                 service_tx
                     .send(P2pServiceEvent::Stream(source, meta, stream))
@@ -173,42 +181,42 @@ async fn accept_bi(remote: PeerAddress, mut stream: P2pQuicStream, ctx: SharedCt
                     .print_on_err("[PeerConnectionInternal] send accpeted stream to service");
                 Ok(())
             } else {
-                log::warn!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} => service not found");
+                log::warn!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} => service not found");
                 write_object::<_, _, 500>(&mut stream, &Err::<(), _>("service not found".to_string())).await?;
                 Err(anyhow!("service not found"))
             }
         }
         Some(RouteAction::Next(next)) => {
-            if let Some(alias) = ctx.peer(&next) {
-                log::info!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} => forward to {next}");
+            if let Some(alias) = ctx.conn(&next) {
+                log::info!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} => forward to {next}");
                 match alias.open_stream(service, source, dest, meta).await {
                     Ok(mut next_stream) => {
                         write_object::<_, _, 500>(&mut stream, &Ok::<_, String>(())).await?;
-                        log::info!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} => start copy_bidirectional");
+                        log::info!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} => start copy_bidirectional");
                         match copy_bidirectional(&mut next_stream, &mut stream).await {
                             Ok(stats) => {
-                                log::info!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} done {stats:?}");
+                                log::info!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} done {stats:?}");
                             }
                             Err(err) => {
-                                log::error!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} err {err}");
+                                log::error!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} err {err}");
                             }
                         }
                         Ok(())
                     }
                     Err(err) => {
-                        log::error!("[PeerConnectionInternal {remote}] stream service {service} source {source} to dest {dest} => open bi error {err}");
+                        log::error!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} => open bi error {err}");
                         write_object::<_, _, 500>(&mut stream, &Err::<(), _>(err.to_string())).await?;
                         Err(err)
                     }
                 }
             } else {
-                log::warn!("[PeerConnectionInternal {remote}] new stream with service {service} source {source} to dest {dest} => but connection for next {next} not found");
+                log::warn!("[PeerConnectionInternal {to_peer}] new stream with service {service} source {source} to dest {dest} => but connection for next {next} not found");
                 write_object::<_, _, 500>(&mut stream, &Err::<(), _>("route not found".to_string())).await?;
                 Err(anyhow!("route not found"))
             }
         }
         None => {
-            log::warn!("[PeerConnectionInternal {remote}] new stream with service {service} source {source} to dest {dest} => but route path not found");
+            log::warn!("[PeerConnectionInternal {to_peer}] new stream with service {service} source {source} to dest {dest} => but route path not found");
             write_object::<_, _, 500>(&mut stream, &Err::<(), _>("route not found".to_string())).await?;
             Err(anyhow!("route not found"))
         }

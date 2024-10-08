@@ -1,4 +1,10 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    fmt::{Debug, Display},
+    net::SocketAddr,
+    ops::Deref,
+    str::FromStr,
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use ctx::SharedCtx;
@@ -43,7 +49,56 @@ pub use stream::P2pQuicStream;
 pub use utils::*;
 
 #[derive(Debug, Display, Clone, Copy, From, Deref, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct PeerAddress(SocketAddr);
+pub struct PeerId(u64);
+
+#[derive(Debug, Display, From, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ConnectionId(u64);
+
+impl ConnectionId {
+    pub fn rand() -> Self {
+        Self(rand::random())
+    }
+}
+
+#[derive(Debug, Clone, From, Display, Deref, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkAddress(SocketAddr);
+
+#[derive(Debug, Clone, From, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerAddress(PeerId, NetworkAddress);
+
+impl PeerAddress {
+    pub fn new(p: PeerId, a: NetworkAddress) -> Self {
+        Self(p, a)
+    }
+
+    pub fn peer_id(&self) -> PeerId {
+        self.0
+    }
+
+    pub fn network_address(&self) -> &NetworkAddress {
+        &self.1
+    }
+}
+
+impl Display for PeerAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}", self.peer_id(), self.network_address())
+    }
+}
+
+impl FromStr for PeerAddress {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split('@').collect();
+        if parts.len() != 2 {
+            return Err("Invalid format, expected 'peer_id@network_address'".to_string());
+        }
+        let peer_id = parts[0].parse::<u64>().map(PeerId).map_err(|e| e.to_string())?;
+        let network_address = parts[1].parse::<SocketAddr>().map(NetworkAddress).map_err(|e| e.to_string())?;
+        Ok(Self(peer_id, network_address))
+    }
+}
 
 #[derive(Debug)]
 enum PeerMainData {
@@ -51,10 +106,10 @@ enum PeerMainData {
 }
 
 enum InternalEvent {
-    PeerConnected(PeerAddress, u16),
-    PeerConnectError(PeerAddress, anyhow::Error),
-    PeerData(PeerAddress, PeerMainData),
-    PeerDisconnected(PeerAddress),
+    PeerConnected(ConnectionId, PeerId, u16),
+    PeerConnectError(ConnectionId, Option<PeerId>, anyhow::Error),
+    PeerData(ConnectionId, PeerId, PeerMainData),
+    PeerDisconnected(ConnectionId, PeerId),
 }
 
 enum ControlCmd {
@@ -62,8 +117,9 @@ enum ControlCmd {
 }
 
 pub struct P2pNetworkConfig {
-    pub addr: SocketAddr,
-    pub advertise: Option<SocketAddr>,
+    pub peer_id: PeerId,
+    pub listen_addr: SocketAddr,
+    pub advertise: Option<NetworkAddress>,
     pub priv_key: PrivatePkcs8KeyDer<'static>,
     pub cert: CertificateDer<'static>,
     pub tick_ms: u64,
@@ -71,12 +127,13 @@ pub struct P2pNetworkConfig {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum P2pNetworkEvent {
-    PeerConnected(PeerAddress),
-    PeerDisconnected(PeerAddress),
+    PeerConnected(ConnectionId, PeerId),
+    PeerDisconnected(ConnectionId, PeerId),
     Continue,
 }
 
 pub struct P2pNetwork {
+    local_id: PeerId,
     endpoint: Endpoint,
     control_tx: UnboundedSender<ControlCmd>,
     control_rx: UnboundedReceiver<ControlCmd>,
@@ -91,18 +148,19 @@ pub struct P2pNetwork {
 
 impl P2pNetwork {
     pub async fn new(cfg: P2pNetworkConfig) -> anyhow::Result<Self> {
-        log::info!("[P2pNetwork] starting in port {}", cfg.addr);
-        let endpoint = make_server_endpoint(cfg.addr, cfg.priv_key, cfg.cert)?;
+        log::info!("[P2pNetwork] starting node {}@{}", cfg.peer_id, cfg.listen_addr);
+        let endpoint = make_server_endpoint(cfg.listen_addr, cfg.priv_key, cfg.cert)?;
         let (internal_tx, internal_rx) = channel(10);
         let (control_tx, control_rx) = unbounded_channel();
         let mut discovery = PeerDiscovery::default();
-        let router = SharedRouterTable::new(cfg.addr.into());
+        let router = SharedRouterTable::new(cfg.peer_id);
 
         if let Some(addr) = cfg.advertise {
-            discovery.enable_local(addr.into());
+            discovery.enable_local(cfg.peer_id, addr);
         }
 
         Ok(Self {
+            local_id: cfg.peer_id,
             endpoint,
             neighbours: NetworkNeighbours::default(),
             internal_tx,
@@ -150,61 +208,58 @@ impl P2pNetwork {
 
     fn process_tick(&mut self, now_ms: u64) -> anyhow::Result<P2pNetworkEvent> {
         self.discovery.clear_timeout(now_ms);
-        for peer in self.neighbours.connected_peers() {
-            let route: router::RouterTableSync = self.router.create_sync(&peer.remote());
-            let advertise = self.discovery.create_sync_for(now_ms, &peer.remote());
-            if let Some(alias) = self.ctx.peer(&peer.remote()) {
+        for conn in self.neighbours.connected_conns() {
+            let peer_id = conn.peer_id().expect("conected neighbours should have peer_id");
+            let conn_id = conn.conn_id();
+            let route: router::RouterTableSync = self.router.create_sync(&peer_id);
+            let advertise = self.discovery.create_sync_for(now_ms, &peer_id);
+            if let Some(alias) = self.ctx.conn(&conn_id) {
                 if let Err(e) = alias.try_send(PeerMessage::Sync { route, advertise }) {
-                    log::error!("[P2pNetwork] try send message to peer {} error {e}", peer.remote());
+                    log::error!("[P2pNetwork] try send message to peer {peer_id} over conn {conn_id} error {e}");
                 }
             }
         }
         for addr in self.discovery.remotes() {
-            self.control_tx.send(ControlCmd::Connect(*addr, None))?;
+            self.control_tx.send(ControlCmd::Connect(addr.clone(), None))?;
         }
         Ok(P2pNetworkEvent::Continue)
     }
 
     fn process_incoming(&mut self, incoming: Incoming) -> anyhow::Result<P2pNetworkEvent> {
-        let remote: PeerAddress = incoming.remote_address().into();
-        if self.neighbours.has_peer(&remote) {
-            log::warn!("[P2pNetwork] incoming connect from {remote} but already existed => reject");
-            incoming.refuse();
-            Ok(P2pNetworkEvent::Continue)
-        } else {
-            log::info!("[P2pNetwork] incoming connect from {remote} => accept");
-            self.neighbours.insert(remote, PeerConnection::new_incoming(incoming, self.internal_tx.clone(), self.ctx.clone()));
-            Ok(P2pNetworkEvent::Continue)
-        }
+        let remote = incoming.remote_address();
+        log::info!("[P2pNetwork] incoming connect from {remote} => accept");
+        let conn = PeerConnection::new_incoming(self.local_id, incoming, self.internal_tx.clone(), self.ctx.clone());
+        self.neighbours.insert(conn.conn_id(), conn);
+        Ok(P2pNetworkEvent::Continue)
     }
 
     fn process_internal(&mut self, now_ms: u64, event: InternalEvent) -> anyhow::Result<P2pNetworkEvent> {
         match event {
-            InternalEvent::PeerConnected(remote, ttl_ms) => {
-                log::info!("[P2pNetwork] connected to {remote}");
-                self.router.set_direct(remote, ttl_ms);
-                self.neighbours.mark_connected(&remote);
-                Ok(P2pNetworkEvent::PeerConnected(remote))
+            InternalEvent::PeerConnected(conn, peer, ttl_ms) => {
+                log::info!("[P2pNetwork] connected to {peer}");
+                self.router.set_direct(conn, peer, ttl_ms);
+                self.neighbours.mark_connected(&conn, peer);
+                Ok(P2pNetworkEvent::PeerConnected(conn, peer))
             }
-            InternalEvent::PeerData(remote, data) => {
-                log::debug!("[P2pNetwork] on data {data:?} from {remote}");
+            InternalEvent::PeerData(conn, peer, data) => {
+                log::debug!("[P2pNetwork] on data {data:?} from {peer}");
                 match data {
                     PeerMainData::Sync { route, advertise } => {
-                        self.router.apply_sync(remote, route);
+                        self.router.apply_sync(conn, route);
                         self.discovery.apply_sync(now_ms, advertise);
                     }
                 }
                 Ok(P2pNetworkEvent::Continue)
             }
-            InternalEvent::PeerConnectError(remote, err) => {
-                log::error!("[P2pNetwork] connect to {remote} error {err}");
+            InternalEvent::PeerConnectError(conn, peer, err) => {
+                log::error!("[P2pNetwork] connection {conn} outgoing: {peer:?} error {err}");
                 Ok(P2pNetworkEvent::Continue)
             }
-            InternalEvent::PeerDisconnected(remote) => {
-                log::info!("[P2pNetwork] disconnected from {remote}");
-                self.router.del_direct(&remote);
-                self.neighbours.remove(&remote);
-                Ok(P2pNetworkEvent::PeerDisconnected(remote))
+            InternalEvent::PeerDisconnected(conn, peer) => {
+                log::info!("[P2pNetwork] disconnected from {peer}");
+                self.router.del_direct(&conn);
+                self.neighbours.remove(&conn);
+                Ok(P2pNetworkEvent::PeerDisconnected(conn, peer))
             }
         }
     }
@@ -212,13 +267,14 @@ impl P2pNetwork {
     fn process_control(&mut self, cmd: ControlCmd) -> anyhow::Result<P2pNetworkEvent> {
         match cmd {
             ControlCmd::Connect(addr, tx) => {
-                let res = if self.neighbours.has_peer(&addr) {
+                let res = if self.neighbours.has_peer(&addr.peer_id()) {
                     Ok(())
                 } else {
                     log::info!("[P2pNetwork] connecting to {addr}");
-                    match self.endpoint.connect(*addr, "cluster") {
+                    match self.endpoint.connect(*addr.network_address().deref(), "cluster") {
                         Ok(connecting) => {
-                            self.neighbours.insert(addr, PeerConnection::new_connecting(connecting, self.internal_tx.clone(), self.ctx.clone()));
+                            let conn = PeerConnection::new_connecting(self.local_id, addr.peer_id(), connecting, self.internal_tx.clone(), self.ctx.clone());
+                            self.neighbours.insert(conn.conn_id(), conn);
                             Ok(())
                         }
                         Err(err) => Err(err.into()),

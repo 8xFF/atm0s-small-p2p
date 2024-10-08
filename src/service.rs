@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::{ctx::SharedCtx, msg::P2pServiceId, router::SharedRouterTable, stream::P2pQuicStream, PeerAddress};
+use crate::{ctx::SharedCtx, msg::P2pServiceId, router::SharedRouterTable, stream::P2pQuicStream, PeerId};
 
 pub mod alias_service;
 pub mod visualization_service;
@@ -9,9 +9,9 @@ const SERVICE_CHANNEL_SIZE: usize = 10;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum P2pServiceEvent {
-    Unicast(PeerAddress, Vec<u8>),
-    Broadcast(PeerAddress, Vec<u8>),
-    Stream(PeerAddress, Vec<u8>, P2pQuicStream),
+    Unicast(PeerId, Vec<u8>),
+    Broadcast(PeerId, Vec<u8>),
+    Stream(PeerId, Vec<u8>, P2pQuicStream),
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +39,7 @@ impl P2pService {
         }
     }
 
-    pub async fn send_unicast(&self, dest: PeerAddress, data: Vec<u8>) -> anyhow::Result<()> {
+    pub async fn send_unicast(&self, dest: PeerId, data: Vec<u8>) -> anyhow::Result<()> {
         self.ctx.send_unicast(self.service, dest, data).await
     }
 
@@ -47,7 +47,7 @@ impl P2pService {
         self.ctx.send_broadcast(self.service, data).await
     }
 
-    pub async fn try_send_unicast(&self, dest: PeerAddress, data: Vec<u8>) -> anyhow::Result<()> {
+    pub async fn try_send_unicast(&self, dest: PeerId, data: Vec<u8>) -> anyhow::Result<()> {
         self.ctx.try_send_unicast(self.service, dest, data)
     }
 
@@ -55,7 +55,7 @@ impl P2pService {
         self.ctx.try_send_broadcast(self.service, data)
     }
 
-    pub async fn open_stream(&self, dest: PeerAddress, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
+    pub async fn open_stream(&self, dest: PeerId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
         self.ctx.open_stream(self.service, dest, meta).await
     }
 
@@ -69,7 +69,7 @@ impl P2pService {
 }
 
 impl P2pServiceRequester {
-    pub async fn send_unicast(&self, dest: PeerAddress, data: Vec<u8>) -> anyhow::Result<()> {
+    pub async fn send_unicast(&self, dest: PeerId, data: Vec<u8>) -> anyhow::Result<()> {
         self.ctx.send_unicast(self.service, dest, data).await
     }
 
@@ -77,7 +77,7 @@ impl P2pServiceRequester {
         self.ctx.send_broadcast(self.service, data).await
     }
 
-    pub async fn try_send_unicast(&self, dest: PeerAddress, data: Vec<u8>) -> anyhow::Result<()> {
+    pub async fn try_send_unicast(&self, dest: PeerId, data: Vec<u8>) -> anyhow::Result<()> {
         self.ctx.try_send_unicast(self.service, dest, data)
     }
 
@@ -85,7 +85,7 @@ impl P2pServiceRequester {
         self.ctx.try_send_broadcast(self.service, data)
     }
 
-    pub async fn open_stream(&self, dest: PeerAddress, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
+    pub async fn open_stream(&self, dest: PeerId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
         self.ctx.open_stream(self.service, dest, meta).await
     }
 
