@@ -6,18 +6,16 @@ use test_log::test;
 
 #[test(tokio::test)]
 async fn discovery_remain_node() {
-    let (mut node1, addr1) = create_node(true, 1).await;
+    let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     log::info!("created node1 {addr1}");
     tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
 
-    let (mut node2, addr2) = create_node(false, 2).await;
+    let (mut node2, addr2) = create_node(false, 2, vec![addr1]).await;
     log::info!("created node2 {addr2}");
-    let node2_requester = node2.requester();
     tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
 
-    let (mut node3, addr3) = create_node(false, 3).await;
+    let (mut node3, addr3) = create_node(false, 3, vec![addr2]).await;
     log::info!("created node3 {addr3}");
-    let node3_requester = node3.requester();
     let node3_neighbours = Arc::new(Mutex::new(HashSet::new()));
     let node3_neighbours_c = node3_neighbours.clone();
     tokio::spawn(async move {
@@ -33,11 +31,6 @@ async fn discovery_remain_node() {
             }
         }
     });
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    node2_requester.connect(addr1).await.expect("should connect success");
-    node3_requester.connect(addr2).await.expect("should connect success");
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 

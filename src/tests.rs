@@ -12,7 +12,7 @@ mod visualization;
 pub const DEFAULT_CLUSTER_CERT: &[u8] = include_bytes!("../certs/dev.cluster.cert");
 pub const DEFAULT_CLUSTER_KEY: &[u8] = include_bytes!("../certs/dev.cluster.key");
 
-async fn create_node(advertise: bool, peer_id: u64) -> (P2pNetwork, PeerAddress) {
+async fn create_node(advertise: bool, peer_id: u64, seeds: Vec<PeerAddress>) -> (P2pNetwork, PeerAddress) {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let key: PrivatePkcs8KeyDer<'_> = PrivatePkcs8KeyDer::from(DEFAULT_CLUSTER_KEY.to_vec());
@@ -31,6 +31,7 @@ async fn create_node(advertise: bool, peer_id: u64) -> (P2pNetwork, PeerAddress)
             priv_key: key,
             cert: cert,
             tick_ms: 100,
+            seeds,
         })
         .await
         .unwrap(),

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, str::FromStr, time::Duration};
+use std::{net::SocketAddr, str::FromStr};
 
 use atm0s_small_p2p::{P2pNetwork, P2pNetworkConfig, PeerAddress};
 use clap::Parser;
@@ -54,21 +54,10 @@ async fn main() {
         priv_key: key,
         cert: cert,
         tick_ms: 100,
+        seeds: args.sdn_seeds.into_iter().map(|s| PeerAddress::from_str(s.as_str()).expect("should parse address")).collect::<Vec<_>>(),
     })
     .await
     .expect("should create network");
-
-    let sdn_seeds = args.sdn_seeds.into_iter().map(|s| PeerAddress::from_str(s.as_str()).expect("should parse address")).collect::<Vec<_>>();
-
-    let requester = p2p.requester();
-    tokio::spawn(async move {
-        loop {
-            for seed in &sdn_seeds {
-                requester.try_connect(seed.clone());
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    });
 
     loop {
         p2p.recv().await.expect("should ok");

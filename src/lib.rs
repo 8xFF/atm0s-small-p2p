@@ -123,6 +123,7 @@ pub struct P2pNetworkConfig {
     pub priv_key: PrivatePkcs8KeyDer<'static>,
     pub cert: CertificateDer<'static>,
     pub tick_ms: u64,
+    pub seeds: Vec<PeerAddress>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -152,7 +153,7 @@ impl P2pNetwork {
         let endpoint = make_server_endpoint(cfg.listen_addr, cfg.priv_key, cfg.cert)?;
         let (internal_tx, internal_rx) = channel(10);
         let (control_tx, control_rx) = unbounded_channel();
-        let mut discovery = PeerDiscovery::default();
+        let mut discovery = PeerDiscovery::new(cfg.seeds);
         let router = SharedRouterTable::new(cfg.peer_id);
 
         if let Some(addr) = cfg.advertise {

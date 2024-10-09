@@ -13,11 +13,20 @@ pub struct PeerDiscoverySync(Vec<(PeerId, u64, NetworkAddress)>);
 
 #[derive(Debug, Default)]
 pub struct PeerDiscovery {
+    seeds: Vec<PeerAddress>,
     local: Option<(PeerId, NetworkAddress)>,
     remotes: BTreeMap<PeerId, (u64, NetworkAddress)>,
 }
 
 impl PeerDiscovery {
+    pub fn new(seeds: Vec<PeerAddress>) -> Self {
+        Self {
+            seeds,
+            local: None,
+            remotes: Default::default(),
+        }
+    }
+
     pub fn enable_local(&mut self, peer_id: PeerId, address: NetworkAddress) {
         log::info!("[PeerDiscovery] enable local as {address}");
         self.local = Some((peer_id, address));
@@ -57,7 +66,7 @@ impl PeerDiscovery {
         }
     }
     pub fn remotes(&self) -> impl Iterator<Item = PeerAddress> + '_ {
-        self.remotes.iter().map(|(p, (_, a))| PeerAddress(*p, a.clone()))
+        self.remotes.iter().map(|(p, (_, a))| PeerAddress(*p, a.clone())).chain(self.seeds.iter().map(|s| s.clone()))
     }
 }
 
