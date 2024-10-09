@@ -13,7 +13,7 @@ pub const DEFAULT_CLUSTER_KEY: &[u8] = include_bytes!("../certs/dev.cluster.key"
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// UDP/TCP port for serving QUIC/TCP connection for SDN network
-    #[arg(env, long, default_value_t = 1)]
+    #[arg(env, long)]
     sdn_peer_id: u64,
 
     /// UDP/TCP port for serving QUIC/TCP connection for SDN network

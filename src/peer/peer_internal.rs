@@ -5,7 +5,7 @@
 //! - Only use async with current connection stream
 //! - For other communication shoud use try_send for avoding blocking
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use anyhow::anyhow;
 use futures::{SinkExt, StreamExt};
@@ -14,6 +14,7 @@ use tokio::{
     io::copy_bidirectional,
     select,
     sync::mpsc::{Receiver, Sender},
+    time::Interval,
 };
 use tokio_util::codec::Framed;
 
@@ -37,6 +38,7 @@ pub struct PeerConnectionInternal {
     framed: Framed<P2pQuicStream, BincodeCodec<PeerMessage>>,
     internal_tx: Sender<InternalEvent>,
     control_rx: Receiver<PeerConnectionControl>,
+    ticker: Interval,
 }
 
 impl PeerConnectionInternal {
@@ -61,11 +63,17 @@ impl PeerConnectionInternal {
             framed: Framed::new(stream, BincodeCodec::default()),
             internal_tx,
             control_rx,
+            ticker: tokio::time::interval(Duration::from_secs(1)),
         }
     }
 
     pub async fn recv_complex(&mut self) -> anyhow::Result<()> {
         select! {
+            _ = self.ticker.tick() => {
+                let rtt_ms = self.connection.rtt().as_millis().min(u16::MAX as u128) as u16;
+                self.ctx.router().set_direct(self.conn_id, self.to_id, rtt_ms);
+                Ok(())
+            },
             open = self.connection.accept_bi() => {
                 let (send, recv) = open?;
                 self.on_accept_bi(send, recv).await?;
@@ -78,7 +86,7 @@ impl PeerConnectionInternal {
             control = self.control_rx.recv() => {
                 let control = control.ok_or(anyhow!("peer control channel ended"))?;
                 self.on_control(control).await
-            }
+            },
         }
     }
 
