@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use peer_internal::PeerConnectionInternal;
@@ -12,6 +12,7 @@ use tokio::sync::{
 use crate::{
     ctx::SharedCtx,
     msg::P2pServiceId,
+    secure::HandshakeProtocol,
     stream::{wait_object, write_object, P2pQuicStream},
     ConnectionId, PeerId,
 };
@@ -34,19 +35,20 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
-    pub fn new_incoming(local_id: PeerId, incoming: Incoming, internal_tx: Sender<InternalEvent>, ctx: SharedCtx) -> Self {
+    pub fn new_incoming<SECURE: HandshakeProtocol>(secure: Arc<SECURE>, local_id: PeerId, incoming: Incoming, internal_tx: Sender<InternalEvent>, ctx: SharedCtx) -> Self {
         let remote = incoming.remote_address();
         let conn_id = ConnectionId::rand();
 
         tokio::spawn(async move {
-            log::info!("[PeerConnection] wait incoming from {remote}");
+            log::info!("[PeerConnection {conn_id}] wait incoming from {remote}");
             match incoming.await {
                 Ok(connection) => {
-                    log::info!("[PeerConnection] got connection from {remote}");
+                    log::info!("[PeerConnection {conn_id}] got connection from {remote}");
                     match connection.accept_bi().await {
                         Ok((send, recv)) => {
-                            if let Err(e) = run_connection(ctx, remote, conn_id, local_id, PeerConnectionDirection::Incoming, connection, send, recv, internal_tx).await {
-                                log::error!("[PeerConnection] connection from {remote} error {e}");
+                            if let Err(e) = run_connection(secure, ctx, remote, conn_id, local_id, PeerConnectionDirection::Incoming, &connection, send, recv, internal_tx).await {
+                                log::error!("[PeerConnection {conn_id}] connection from {remote} error {e}");
+                                let _ = tokio::time::timeout(Duration::from_secs(2), connection.closed()).await;
                             }
                         }
                         Err(err) => internal_tx.send(InternalEvent::PeerConnectError(conn_id, None, err.into())).await.expect("should send to main"),
@@ -58,18 +60,18 @@ impl PeerConnection {
         Self { conn_id, peer_id: None }
     }
 
-    pub fn new_connecting(local_id: PeerId, to_peer: PeerId, connecting: Connecting, internal_tx: Sender<InternalEvent>, ctx: SharedCtx) -> Self {
+    pub fn new_connecting<SECURE: HandshakeProtocol>(secure: Arc<SECURE>, local_id: PeerId, to_peer: PeerId, connecting: Connecting, internal_tx: Sender<InternalEvent>, ctx: SharedCtx) -> Self {
         let remote = connecting.remote_address();
         let conn_id = ConnectionId::rand();
 
         tokio::spawn(async move {
             match connecting.await {
                 Ok(connection) => {
-                    log::info!("[PeerConnection] connected to {remote}");
+                    log::info!("[PeerConnection {conn_id}] connected to {remote}");
                     match connection.open_bi().await {
                         Ok((send, recv)) => {
-                            if let Err(e) = run_connection(ctx, remote, conn_id, local_id, PeerConnectionDirection::Outgoing(to_peer), connection, send, recv, internal_tx).await {
-                                log::error!("[PeerConnection] connection from {remote} error {e}");
+                            if let Err(e) = run_connection(secure, ctx, remote, conn_id, local_id, PeerConnectionDirection::Outgoing(to_peer), &connection, send, recv, internal_tx).await {
+                                log::error!("[PeerConnection {conn_id}] connection to {remote} error {e}");
                             }
                         }
                         Err(err) => internal_tx
@@ -113,38 +115,59 @@ enum PeerConnectionDirection {
 struct ConnectReq {
     from: PeerId,
     to: PeerId,
+    auth: Vec<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ConnectRes {
-    success: bool,
+    result: Result<Vec<u8>, String>,
 }
 
-async fn run_connection(
+async fn run_connection<SECURE: HandshakeProtocol>(
+    secure: Arc<SECURE>,
     ctx: SharedCtx,
     remote: SocketAddr,
     conn_id: ConnectionId,
     local_id: PeerId,
     direction: PeerConnectionDirection,
-    connection: Connection,
+    connection: &Connection,
     mut send: SendStream,
     mut recv: RecvStream,
     internal_tx: Sender<InternalEvent>,
 ) -> anyhow::Result<()> {
     let to_id = if let PeerConnectionDirection::Outgoing(dest) = direction {
-        write_object::<_, _, 500>(&mut send, &ConnectReq { from: local_id, to: dest }).await?;
+        let auth = secure.create_request(local_id, dest);
+        write_object::<_, _, 500>(&mut send, &ConnectReq { from: local_id, to: dest, auth }).await?;
         let res: ConnectRes = wait_object::<_, _, 500>(&mut recv).await?;
-        if !res.success {
-            return Err(anyhow!("destination rejected"));
+        log::info!("{res:?}");
+        match res.result {
+            Ok(auth) => {
+                if let Err(e) = secure.verify_response(auth, dest, local_id) {
+                    return Err(anyhow!("destination auth failure: {e}"));
+                }
+                dest
+            }
+            Err(err) => {
+                return Err(anyhow!("destination rejected: {err}"));
+            }
         }
-        dest
     } else {
         let req: ConnectReq = wait_object::<_, _, 500>(&mut recv).await?;
-        if req.to != local_id {
-            write_object::<_, _, 500>(&mut send, &ConnectRes { success: false }).await?;
+        if let Err(e) = secure.verify_request(req.auth, req.from, req.to) {
+            write_object::<_, _, 500>(&mut send, &ConnectRes { result: Err(e.clone()) }).await?;
+            return Err(anyhow!("destination auth failure: {e}"));
+        } else if req.to != local_id {
+            write_object::<_, _, 500>(
+                &mut send,
+                &ConnectRes {
+                    result: Err("destination not match".to_owned()),
+                },
+            )
+            .await?;
             return Err(anyhow!("destination wrong"));
         } else {
-            write_object::<_, _, 500>(&mut send, &ConnectRes { success: true }).await?;
+            let auth = secure.create_response(req.to, req.from);
+            write_object::<_, _, 500>(&mut send, &ConnectRes { result: Ok(auth) }).await?;
             req.from
         }
     };
@@ -153,18 +176,18 @@ async fn run_connection(
     let (control_tx, control_rx) = channel(10);
     let alias = PeerConnectionAlias::new(local_id, to_id, conn_id, control_tx);
     let mut internal = PeerConnectionInternal::new(ctx.clone(), conn_id, to_id, connection.clone(), send, recv, internal_tx.clone(), control_rx);
-    log::info!("[PeerConnection] started {remote}, rtt: {rtt_ms}");
+    log::info!("[PeerConnection {conn_id}] started {remote}, rtt: {rtt_ms}");
     ctx.register_conn(conn_id, alias);
     internal_tx.send(InternalEvent::PeerConnected(conn_id, to_id, rtt_ms)).await.expect("should send to main");
-    log::info!("[PeerConnection] run loop for {remote}");
+    log::info!("[PeerConnection {conn_id}] run loop for {remote}");
     loop {
         if let Err(e) = internal.recv_complex().await {
-            log::error!("[PeerConnection] {remote} error {e}");
+            log::error!("[PeerConnection {conn_id}] {remote} error {e}");
             break;
         }
     }
     internal_tx.send(InternalEvent::PeerDisconnected(conn_id, to_id)).await.expect("should send to main");
-    log::info!("[PeerConnection] end loop for {remote}");
+    log::info!("[PeerConnection {conn_id}] end loop for {remote}");
     ctx.unregister_conn(&conn_id);
     Ok(())
 }

@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, str::FromStr};
 
-use atm0s_small_p2p::{P2pNetwork, P2pNetworkConfig, PeerAddress};
+use atm0s_small_p2p::{P2pNetwork, P2pNetworkConfig, PeerAddress, SharedKeyHandshake};
 use clap::Parser;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -29,6 +29,10 @@ struct Args {
     /// This option is useful with high performance relay node
     #[arg(env, long)]
     sdn_advertise_address: Option<SocketAddr>,
+
+    /// Sdn secure code
+    #[arg(env, long, default_value = "insecure")]
+    sdn_secure_code: String,
 }
 
 #[tokio::main]
@@ -44,17 +48,18 @@ async fn main() {
     let args: Args = Args::parse();
     tracing_subscriber::registry().with(fmt::layer()).with(EnvFilter::from_default_env()).init();
 
-    let key = PrivatePkcs8KeyDer::from(DEFAULT_CLUSTER_KEY.to_vec());
+    let priv_key = PrivatePkcs8KeyDer::from(DEFAULT_CLUSTER_KEY.to_vec());
     let cert = CertificateDer::from(DEFAULT_CLUSTER_CERT.to_vec());
 
     let mut p2p = P2pNetwork::new(P2pNetworkConfig {
         peer_id: args.sdn_peer_id.into(),
         listen_addr: args.sdn_listener,
         advertise: args.sdn_advertise_address.map(|a| a.into()),
-        priv_key: key,
-        cert: cert,
+        priv_key,
+        cert,
         tick_ms: 100,
         seeds: args.sdn_seeds.into_iter().map(|s| PeerAddress::from_str(s.as_str()).expect("should parse address")).collect::<Vec<_>>(),
+        secure: SharedKeyHandshake::from(args.sdn_secure_code.as_str()),
     })
     .await
     .expect("should create network");

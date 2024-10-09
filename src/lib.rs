@@ -3,6 +3,7 @@ use std::{
     net::SocketAddr,
     ops::Deref,
     str::FromStr,
+    sync::Arc,
     time::Duration,
 };
 
@@ -36,6 +37,7 @@ mod peer;
 mod quic;
 mod requester;
 mod router;
+mod secure;
 mod service;
 mod stream;
 #[cfg(test)]
@@ -44,6 +46,7 @@ mod utils;
 
 pub use requester::P2pNetworkRequester;
 pub use router::SharedRouterTable;
+pub use secure::*;
 pub use service::*;
 pub use stream::P2pQuicStream;
 pub use utils::*;
@@ -116,7 +119,7 @@ enum ControlCmd {
     Connect(PeerAddress, Option<oneshot::Sender<anyhow::Result<()>>>),
 }
 
-pub struct P2pNetworkConfig {
+pub struct P2pNetworkConfig<SECURE> {
     pub peer_id: PeerId,
     pub listen_addr: SocketAddr,
     pub advertise: Option<NetworkAddress>,
@@ -124,6 +127,7 @@ pub struct P2pNetworkConfig {
     pub cert: CertificateDer<'static>,
     pub tick_ms: u64,
     pub seeds: Vec<PeerAddress>,
+    pub secure: SECURE,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -133,7 +137,7 @@ pub enum P2pNetworkEvent {
     Continue,
 }
 
-pub struct P2pNetwork {
+pub struct P2pNetwork<SECURE> {
     local_id: PeerId,
     endpoint: Endpoint,
     control_tx: UnboundedSender<ControlCmd>,
@@ -145,10 +149,11 @@ pub struct P2pNetwork {
     router: SharedRouterTable,
     discovery: PeerDiscovery,
     ctx: SharedCtx,
+    secure: Arc<SECURE>,
 }
 
-impl P2pNetwork {
-    pub async fn new(cfg: P2pNetworkConfig) -> anyhow::Result<Self> {
+impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
+    pub async fn new(cfg: P2pNetworkConfig<SECURE>) -> anyhow::Result<Self> {
         log::info!("[P2pNetwork] starting node {}@{}", cfg.peer_id, cfg.listen_addr);
         let endpoint = make_server_endpoint(cfg.listen_addr, cfg.priv_key, cfg.cert)?;
         let (internal_tx, internal_rx) = channel(10);
@@ -172,6 +177,7 @@ impl P2pNetwork {
             ctx: SharedCtx::new(router.clone()),
             router,
             discovery,
+            secure: Arc::new(cfg.secure),
         })
     }
 
@@ -229,7 +235,7 @@ impl P2pNetwork {
     fn process_incoming(&mut self, incoming: Incoming) -> anyhow::Result<P2pNetworkEvent> {
         let remote = incoming.remote_address();
         log::info!("[P2pNetwork] incoming connect from {remote} => accept");
-        let conn = PeerConnection::new_incoming(self.local_id, incoming, self.internal_tx.clone(), self.ctx.clone());
+        let conn = PeerConnection::new_incoming(self.secure.clone(), self.local_id, incoming, self.internal_tx.clone(), self.ctx.clone());
         self.neighbours.insert(conn.conn_id(), conn);
         Ok(P2pNetworkEvent::Continue)
     }
@@ -237,13 +243,13 @@ impl P2pNetwork {
     fn process_internal(&mut self, now_ms: u64, event: InternalEvent) -> anyhow::Result<P2pNetworkEvent> {
         match event {
             InternalEvent::PeerConnected(conn, peer, ttl_ms) => {
-                log::info!("[P2pNetwork] connected to {peer}");
+                log::info!("[P2pNetwork] connection {conn} connected to {peer}");
                 self.router.set_direct(conn, peer, ttl_ms);
                 self.neighbours.mark_connected(&conn, peer);
                 Ok(P2pNetworkEvent::PeerConnected(conn, peer))
             }
             InternalEvent::PeerData(conn, peer, data) => {
-                log::debug!("[P2pNetwork] on data {data:?} from {peer}");
+                log::debug!("[P2pNetwork] connection {conn} on data {data:?} from {peer}");
                 match data {
                     PeerMainData::Sync { route, advertise } => {
                         self.router.apply_sync(conn, route);
@@ -257,7 +263,7 @@ impl P2pNetwork {
                 Ok(P2pNetworkEvent::Continue)
             }
             InternalEvent::PeerDisconnected(conn, peer) => {
-                log::info!("[P2pNetwork] disconnected from {peer}");
+                log::info!("[P2pNetwork] connection {conn} disconnected from {peer}");
                 self.router.del_direct(&conn);
                 self.neighbours.remove(&conn);
                 Ok(P2pNetworkEvent::PeerDisconnected(conn, peer))
@@ -274,7 +280,7 @@ impl P2pNetwork {
                     log::info!("[P2pNetwork] connecting to {addr}");
                     match self.endpoint.connect(*addr.network_address().deref(), "cluster") {
                         Ok(connecting) => {
-                            let conn = PeerConnection::new_connecting(self.local_id, addr.peer_id(), connecting, self.internal_tx.clone(), self.ctx.clone());
+                            let conn = PeerConnection::new_connecting(self.secure.clone(), self.local_id, addr.peer_id(), connecting, self.internal_tx.clone(), self.ctx.clone());
                             self.neighbours.insert(conn.conn_id(), conn);
                             Ok(())
                         }
