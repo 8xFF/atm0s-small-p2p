@@ -398,7 +398,7 @@ mod test {
             Self {
                 internal: AliasServiceInternal {
                     local: HashMap::new(),
-                    cache: LruCache::new(LRU_CACHE_SIZE.try_into().unwrap()),
+                    cache: LruCache::new(LRU_CACHE_SIZE.try_into().expect("should create NoneZeroUsize")),
                     find_reqs: HashMap::new(),
                     outs: VecDeque::new(),
                 },

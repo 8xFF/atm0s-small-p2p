@@ -19,8 +19,8 @@ async fn create_node(advertise: bool, peer_id: u64, seeds: Vec<PeerAddress>) -> 
     let cert = CertificateDer::from(DEFAULT_CLUSTER_CERT.to_vec());
 
     let addr = {
-        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-        socket.local_addr().unwrap()
+        let socket = UdpSocket::bind("127.0.0.1:0").expect("should bind");
+        socket.local_addr().expect("should get local")
     };
     let peer_id = PeerId::from(peer_id);
     (
@@ -34,7 +34,7 @@ async fn create_node(advertise: bool, peer_id: u64, seeds: Vec<PeerAddress>) -> 
             seeds,
         })
         .await
-        .unwrap(),
+        .expect("should create network"),
         (peer_id, addr.into()).into(),
     )
 }

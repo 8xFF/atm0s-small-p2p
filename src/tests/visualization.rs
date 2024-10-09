@@ -20,8 +20,8 @@ async fn discovery_new_node() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let mut events = vec![
-        tokio::time::timeout(Duration::from_secs(3), service2.recv()).await.unwrap().unwrap(),
-        tokio::time::timeout(Duration::from_secs(3), service2.recv()).await.unwrap().unwrap(),
+        tokio::time::timeout(Duration::from_secs(3), service2.recv()).await.expect("").expect(""),
+        tokio::time::timeout(Duration::from_secs(3), service2.recv()).await.expect("").expect(""),
     ];
 
     for event in events.iter_mut() {

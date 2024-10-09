@@ -94,15 +94,15 @@ impl<Item: DeserializeOwned + Debug> Decoder for BincodeCodec<Item> {
 pub async fn wait_object<R: AsyncRead + Unpin, O: DeserializeOwned, const MAX_SIZE: usize>(reader: &mut R) -> anyhow::Result<O> {
     let mut len_buf = [0; 2];
     let mut data_buf = [0; MAX_SIZE];
-    reader.read_exact(&mut len_buf).await.unwrap();
+    reader.read_exact(&mut len_buf).await?;
     let handshake_len = u16::from_be_bytes([len_buf[0], len_buf[1]]) as usize;
     if handshake_len > data_buf.len() {
         return Err(anyhow!("packet to big {} vs {MAX_SIZE}", data_buf.len()));
     }
 
-    reader.read_exact(&mut data_buf[0..handshake_len]).await.unwrap();
+    reader.read_exact(&mut data_buf[0..handshake_len]).await?;
 
-    Ok(bincode::deserialize(&data_buf[0..handshake_len]).unwrap())
+    Ok(bincode::deserialize(&data_buf[0..handshake_len])?)
 }
 
 pub async fn write_object<W: AsyncWrite + Send + Unpin, O: Serialize, const MAX_SIZE: usize>(writer: &mut W, object: &O) -> anyhow::Result<()> {
@@ -112,7 +112,7 @@ pub async fn write_object<W: AsyncWrite + Send + Unpin, O: Serialize, const MAX_
     }
     let len_buf = (data_buf.len() as u16).to_be_bytes();
 
-    writer.write_all(&len_buf).await.unwrap();
-    writer.write_all(&data_buf).await.unwrap();
+    writer.write_all(&len_buf).await?;
+    writer.write_all(&data_buf).await?;
     Ok(())
 }
