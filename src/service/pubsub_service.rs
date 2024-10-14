@@ -5,7 +5,10 @@
 //!
 //! For avoiding channel state out-of-sync, we add simple heatbeat, each some seconds each node will broadcast a list of active channel with flag publish and subscribe.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use derive_more::derive::{Display, From};
@@ -15,6 +18,7 @@ use subscriber::SubscriberLocalId;
 use tokio::{
     select,
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    time::Interval,
 };
 
 use crate::{ErrorExt, PeerId};
@@ -26,6 +30,8 @@ mod subscriber;
 
 pub use publisher::{Publisher, PublisherEvent};
 pub use subscriber::{Subscriber, SubscriberEvent};
+
+const HEATBEAT_INTERVAL_MS: u64 = 5_000;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub enum PeerSrc {
@@ -81,6 +87,7 @@ pub struct PubsubService {
     internal_tx: UnboundedSender<InternalMsg>,
     internal_rx: UnboundedReceiver<InternalMsg>,
     channels: HashMap<PubsubChannelId, PubsubChannelState>,
+    tick: Interval,
 }
 
 impl PubsubService {
@@ -91,6 +98,7 @@ impl PubsubService {
             internal_rx,
             internal_tx,
             channels: HashMap::new(),
+            tick: tokio::time::interval(Duration::from_millis(HEATBEAT_INTERVAL_MS)),
         }
     }
 
@@ -102,6 +110,9 @@ impl PubsubService {
 
     pub async fn recv(&mut self) -> anyhow::Result<()> {
         select! {
+            _ = self.tick.tick() => {
+                self.on_tick().await
+            },
             e = self.service.recv() => {
                 self.on_service(e.ok_or_else(|| anyhow!("service channel failed"))?).await
             },
@@ -109,6 +120,19 @@ impl PubsubService {
                 self.on_internal(e.ok_or_else(|| anyhow!("internal channel crash"))?).await
             },
         }
+    }
+
+    async fn on_tick(&mut self) -> anyhow::Result<()> {
+        let mut heatbeat = vec![];
+        for (channel, state) in self.channels.iter() {
+            heatbeat.push(ChannelHeatbeat {
+                channel: *channel,
+                publish: !state.local_publishers.is_empty(),
+                subscribe: !state.local_subscribers.is_empty(),
+            });
+        }
+        self.broadcast(&PubsubMessage::Heatbeat(heatbeat)).await;
+        Ok(())
     }
 
     async fn on_service(&mut self, event: P2pServiceEvent) -> anyhow::Result<()> {
@@ -168,8 +192,26 @@ impl PubsubService {
                                 }
                             }
                         }
-                        PubsubMessage::Heatbeat(_vec) => {
-                            todo!()
+                        PubsubMessage::Heatbeat(channels) => {
+                            for heatbeat in channels {
+                                if let Some(state) = self.channels.get_mut(&heatbeat.channel) {
+                                    if heatbeat.publish && !state.remote_publishers.contains(&from_peer) {
+                                        // it we out-of-sync from peer then add it to list then fire event
+                                        state.remote_publishers.insert(from_peer);
+                                        for (_, sub_tx) in state.local_subscribers.iter() {
+                                            let _ = sub_tx.send(SubscriberEvent::PeerJoined(PeerSrc::Remote(from_peer)));
+                                        }
+                                    }
+
+                                    if heatbeat.subscribe && !state.remote_subscribers.contains(&from_peer) {
+                                        // it we out-of-sync from peer then add it to list then fire event
+                                        state.remote_subscribers.insert(from_peer);
+                                        for (_, pub_tx) in state.local_publishers.iter() {
+                                            let _ = pub_tx.send(PublisherEvent::PeerJoined(PeerSrc::Remote(from_peer)));
+                                        }
+                                    }
+                                }
+                            }
                         }
                         PubsubMessage::Data(channel, vec) => {
                             if let Some(state) = self.channels.get(&channel) {
