@@ -1,9 +1,10 @@
 use anyhow::anyhow;
+use derive_more::derive::Display;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use super::{InternalMsg, PeerSrc, PubsubChannelId};
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Display, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct PublisherLocalId(u64);
 impl PublisherLocalId {
     pub fn rand() -> Self {
@@ -26,10 +27,11 @@ pub struct Publisher {
 }
 
 impl Publisher {
-    pub fn build(channel_id: PubsubChannelId, control_tx: UnboundedSender<InternalMsg>) -> Self {
+    pub(super) fn build(channel_id: PubsubChannelId, control_tx: UnboundedSender<InternalMsg>) -> Self {
         let (pub_tx, pub_rx) = unbounded_channel();
         let local_id = PublisherLocalId::rand();
-        control_tx.send(InternalMsg::PublisherCreated(local_id, channel_id, pub_tx));
+        log::info!("[Publisher {channel_id}/{local_id}] created");
+        let _ = control_tx.send(InternalMsg::PublisherCreated(local_id, channel_id, pub_tx));
 
         Self {
             local_id,
@@ -51,6 +53,7 @@ impl Publisher {
 
 impl Drop for Publisher {
     fn drop(&mut self) {
+        log::info!("[Publisher {}/{}] destroy", self.channel_id, self.local_id);
         let _ = self.control_tx.send(InternalMsg::PublisherDestroyed(self.local_id, self.channel_id));
     }
 }
