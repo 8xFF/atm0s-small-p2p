@@ -7,7 +7,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::anyhow;
@@ -15,9 +15,13 @@ use derive_more::derive::{Display, From};
 use publisher::PublisherLocalId;
 use serde::{Deserialize, Serialize};
 use subscriber::SubscriberLocalId;
+use thiserror::Error;
 use tokio::{
     select,
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
     time::Interval,
 };
 
@@ -32,11 +36,21 @@ pub use publisher::{Publisher, PublisherEvent};
 pub use subscriber::{Subscriber, SubscriberEvent};
 
 const HEATBEAT_INTERVAL_MS: u64 = 5_000;
+const RPC_TICK_INTERVAL_MS: u64 = 1_000;
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum PeerSrc {
     Local,
     Remote(PeerId),
+}
+
+#[derive(Debug, Display, Clone, Copy, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct RpcId(u64);
+
+impl RpcId {
+    pub fn rand() -> Self {
+        RpcId(rand::random())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -46,6 +60,26 @@ struct ChannelHeatbeat {
     subscribe: bool,
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PubsubRpcError {
+    #[error("Timeout")]
+    Timeout,
+    #[error("NoDestination")]
+    NoDestination,
+}
+
+struct PublishRpcReq {
+    started_at: Instant,
+    timeout: Duration,
+    tx: Option<oneshot::Sender<Result<Vec<u8>, PubsubRpcError>>>,
+}
+
+struct FeedbackRpcReq {
+    started_at: Instant,
+    timeout: Duration,
+    tx: Option<oneshot::Sender<Result<Vec<u8>, PubsubRpcError>>>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum PubsubMessage {
     PublisherJoined(PubsubChannelId),
@@ -53,8 +87,12 @@ enum PubsubMessage {
     SubscriberJoined(PubsubChannelId),
     SubscriberLeaved(PubsubChannelId),
     Heatbeat(Vec<ChannelHeatbeat>),
-    Data(PubsubChannelId, Vec<u8>),
+    Publish(PubsubChannelId, Vec<u8>),
+    PublishRpc(PubsubChannelId, Vec<u8>, RpcId, String),
+    PublishRpcAnswer(Vec<u8>, RpcId),
     Feedback(PubsubChannelId, Vec<u8>),
+    FeedbackRpc(PubsubChannelId, Vec<u8>, RpcId, String),
+    FeedbackRpcAnswer(Vec<u8>, RpcId),
 }
 
 enum InternalMsg {
@@ -63,7 +101,11 @@ enum InternalMsg {
     SubscriberCreated(SubscriberLocalId, PubsubChannelId, UnboundedSender<SubscriberEvent>),
     SubscriberDestroyed(SubscriberLocalId, PubsubChannelId),
     Publish(PublisherLocalId, PubsubChannelId, Vec<u8>),
+    PublishRpc(PublisherLocalId, PubsubChannelId, Vec<u8>, String, oneshot::Sender<Result<Vec<u8>, PubsubRpcError>>, Duration),
+    PublishRpcAnswer(RpcId, PeerSrc, Vec<u8>),
     Feedback(SubscriberLocalId, PubsubChannelId, Vec<u8>),
+    FeedbackRpc(SubscriberLocalId, PubsubChannelId, Vec<u8>, String, oneshot::Sender<Result<Vec<u8>, PubsubRpcError>>, Duration),
+    FeedbackRpcAnswer(RpcId, PeerSrc, Vec<u8>),
 }
 
 #[derive(Debug, From, Display, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
@@ -87,7 +129,10 @@ pub struct PubsubService {
     internal_tx: UnboundedSender<InternalMsg>,
     internal_rx: UnboundedReceiver<InternalMsg>,
     channels: HashMap<PubsubChannelId, PubsubChannelState>,
-    tick: Interval,
+    publish_rpc_reqs: HashMap<RpcId, PublishRpcReq>,
+    feedback_rpc_reqs: HashMap<RpcId, FeedbackRpcReq>,
+    heatbeat_tick: Interval,
+    rpc_tick: Interval,
 }
 
 impl PubsubService {
@@ -98,7 +143,10 @@ impl PubsubService {
             internal_rx,
             internal_tx,
             channels: HashMap::new(),
-            tick: tokio::time::interval(Duration::from_millis(HEATBEAT_INTERVAL_MS)),
+            publish_rpc_reqs: HashMap::new(),
+            feedback_rpc_reqs: HashMap::new(),
+            heatbeat_tick: tokio::time::interval(Duration::from_millis(HEATBEAT_INTERVAL_MS)),
+            rpc_tick: tokio::time::interval(Duration::from_millis(RPC_TICK_INTERVAL_MS)),
         }
     }
 
@@ -108,21 +156,26 @@ impl PubsubService {
         }
     }
 
-    pub async fn recv(&mut self) -> anyhow::Result<()> {
-        select! {
-            _ = self.tick.tick() => {
-                self.on_tick().await
-            },
-            e = self.service.recv() => {
-                self.on_service(e.ok_or_else(|| anyhow!("service channel failed"))?).await
-            },
-            e = self.internal_rx.recv() => {
-                self.on_internal(e.ok_or_else(|| anyhow!("internal channel crash"))?).await
-            },
+    pub async fn run_loop(&mut self) -> anyhow::Result<()> {
+        loop {
+            select! {
+                _ = self.heatbeat_tick.tick() => {
+                    self.on_heatbeat_tick().await?;
+                },
+                _ = self.rpc_tick.tick() => {
+                    self.on_rpc_tick().await?;
+                },
+                e = self.service.recv() => {
+                    self.on_service(e.ok_or_else(|| anyhow!("service channel failed"))?).await?;
+                },
+                e = self.internal_rx.recv() => {
+                    self.on_internal(e.ok_or_else(|| anyhow!("internal channel crash"))?).await?;
+                },
+            }
         }
     }
 
-    async fn on_tick(&mut self) -> anyhow::Result<()> {
+    async fn on_heatbeat_tick(&mut self) -> anyhow::Result<()> {
         let mut heatbeat = vec![];
         for (channel, state) in self.channels.iter() {
             heatbeat.push(ChannelHeatbeat {
@@ -132,6 +185,25 @@ impl PubsubService {
             });
         }
         self.broadcast(&PubsubMessage::Heatbeat(heatbeat)).await;
+        Ok(())
+    }
+
+    async fn on_rpc_tick(&mut self) -> anyhow::Result<()> {
+        for (_req_id, req) in self.publish_rpc_reqs.iter_mut() {
+            if req.started_at.elapsed() >= req.timeout {
+                let _ = req.tx.take().expect("should have tx").send(Err(PubsubRpcError::Timeout));
+            }
+        }
+
+        for (_req_id, req) in self.feedback_rpc_reqs.iter_mut() {
+            if req.started_at.elapsed() >= req.timeout {
+                let _ = req.tx.take().expect("should have tx").send(Err(PubsubRpcError::Timeout));
+            }
+        }
+
+        self.publish_rpc_reqs.retain(|_req_id, req| req.tx.is_some());
+        self.feedback_rpc_reqs.retain(|_req_id, req| req.tx.is_some());
+
         Ok(())
     }
 
@@ -213,10 +285,10 @@ impl PubsubService {
                                 }
                             }
                         }
-                        PubsubMessage::Data(channel, vec) => {
+                        PubsubMessage::Publish(channel, vec) => {
                             if let Some(state) = self.channels.get(&channel) {
                                 for (_, sub_tx) in state.local_subscribers.iter() {
-                                    let _ = sub_tx.send(SubscriberEvent::Data(vec.clone()));
+                                    let _ = sub_tx.send(SubscriberEvent::Publish(vec.clone()));
                                 }
                             }
                         }
@@ -225,6 +297,34 @@ impl PubsubService {
                                 for (_, pub_tx) in state.local_publishers.iter() {
                                     let _ = pub_tx.send(PublisherEvent::Feedback(vec.clone()));
                                 }
+                            }
+                        }
+                        PubsubMessage::PublishRpc(channel, vec, rpc_id, method) => {
+                            if let Some(state) = self.channels.get(&channel) {
+                                for (_, sub_tx) in state.local_subscribers.iter() {
+                                    let _ = sub_tx.send(SubscriberEvent::PublishRpc(vec.clone(), rpc_id, method.clone(), PeerSrc::Remote(from_peer)));
+                                }
+                            }
+                        }
+                        PubsubMessage::FeedbackRpc(channel, vec, rpc_id, method) => {
+                            if let Some(state) = self.channels.get(&channel) {
+                                for (_, pub_tx) in state.local_publishers.iter() {
+                                    let _ = pub_tx.send(PublisherEvent::FeedbackRpc(vec.clone(), rpc_id, method.clone(), PeerSrc::Remote(from_peer)));
+                                }
+                            }
+                        }
+                        PubsubMessage::PublishRpcAnswer(data, rpc_id) => {
+                            if let Some(mut req) = self.publish_rpc_reqs.remove(&rpc_id) {
+                                let _ = req.tx.take().expect("should have req_tx").send(Ok(data));
+                            } else {
+                                log::warn!("[PubsubService] got PublishRpcAnswer with invalid req_id {rpc_id}");
+                            }
+                        }
+                        PubsubMessage::FeedbackRpcAnswer(data, rpc_id) => {
+                            if let Some(mut req) = self.feedback_rpc_reqs.remove(&rpc_id) {
+                                let _ = req.tx.take().expect("should have req_tx").send(Ok(data));
+                            } else {
+                                log::warn!("[PubsubService] got FeedbackRpcAnswer with invalid req_id {rpc_id}");
                             }
                         }
                     }
@@ -297,10 +397,10 @@ impl PubsubService {
             InternalMsg::Publish(_local_id, channel, vec) => {
                 if let Some(state) = self.channels.get(&channel) {
                     for (_, sub_tx) in state.local_subscribers.iter() {
-                        let _ = sub_tx.send(SubscriberEvent::Data(vec.clone()));
+                        let _ = sub_tx.send(SubscriberEvent::Publish(vec.clone()));
                     }
                     for sub_peer in state.remote_subscribers.iter() {
-                        let _ = self.send_to(*sub_peer, &PubsubMessage::Data(channel, vec.clone())).await;
+                        let _ = self.send_to(*sub_peer, &PubsubMessage::Publish(channel, vec.clone())).await;
                     }
                 }
             }
@@ -311,6 +411,78 @@ impl PubsubService {
                     }
                     for pub_peer in state.remote_publishers.iter() {
                         let _ = self.send_to(*pub_peer, &PubsubMessage::Feedback(channel, vec.clone())).await;
+                    }
+                }
+            }
+            InternalMsg::PublishRpc(_local_id, channel, data, method, tx, timeout) => {
+                if let Some(state) = self.channels.get(&channel) {
+                    let req_id = RpcId::rand();
+                    if state.local_subscribers.is_empty() && state.remote_subscribers.is_empty() {
+                        let _ = tx.send(Err(PubsubRpcError::NoDestination));
+                    } else {
+                        for (_, pub_tx) in state.local_subscribers.iter() {
+                            let _ = pub_tx.send(SubscriberEvent::PublishRpc(data.clone(), req_id, method.clone(), PeerSrc::Local));
+                        }
+                        for pub_peer in state.remote_subscribers.iter() {
+                            let _ = self.send_to(*pub_peer, &PubsubMessage::PublishRpc(channel, data.clone(), req_id, method.clone())).await;
+                        }
+                        self.publish_rpc_reqs.insert(
+                            req_id,
+                            PublishRpcReq {
+                                started_at: Instant::now(),
+                                timeout,
+                                tx: Some(tx),
+                            },
+                        );
+                    }
+                } else {
+                    let _ = tx.send(Err(PubsubRpcError::NoDestination));
+                }
+            }
+            InternalMsg::FeedbackRpc(_local_id, channel, data, method, tx, timeout) => {
+                if let Some(state) = self.channels.get(&channel) {
+                    let req_id = RpcId::rand();
+                    if state.local_publishers.is_empty() && state.remote_publishers.is_empty() {
+                        let _ = tx.send(Err(PubsubRpcError::NoDestination));
+                    } else {
+                        for (_, pub_tx) in state.local_publishers.iter() {
+                            let _ = pub_tx.send(PublisherEvent::FeedbackRpc(data.clone(), req_id, method.clone(), PeerSrc::Local));
+                        }
+                        for pub_peer in state.remote_publishers.iter() {
+                            let _ = self.send_to(*pub_peer, &PubsubMessage::FeedbackRpc(channel, data.clone(), req_id, method.clone())).await;
+                        }
+                        self.feedback_rpc_reqs.insert(
+                            req_id,
+                            FeedbackRpcReq {
+                                started_at: Instant::now(),
+                                timeout,
+                                tx: Some(tx),
+                            },
+                        );
+                    }
+                } else {
+                    let _ = tx.send(Err(PubsubRpcError::NoDestination));
+                }
+            }
+            InternalMsg::PublishRpcAnswer(rpc_id, peer_src, data) => {
+                if let PeerSrc::Remote(peer) = peer_src {
+                    let _ = self.send_to(peer, &PubsubMessage::PublishRpcAnswer(data, rpc_id)).await;
+                } else {
+                    if let Some(mut req) = self.publish_rpc_reqs.remove(&rpc_id) {
+                        let _ = req.tx.take().expect("should have req_tx").send(Ok(data));
+                    } else {
+                        log::warn!("[PubsubService] got local PublishRpcAnswer with invalid req_id {rpc_id}");
+                    }
+                }
+            }
+            InternalMsg::FeedbackRpcAnswer(rpc_id, peer_src, data) => {
+                if let PeerSrc::Remote(peer) = peer_src {
+                    let _ = self.send_to(peer, &PubsubMessage::FeedbackRpcAnswer(data, rpc_id)).await;
+                } else {
+                    if let Some(mut req) = self.feedback_rpc_reqs.remove(&rpc_id) {
+                        let _ = req.tx.take().expect("should have req_tx").send(Ok(data));
+                    } else {
+                        log::warn!("[PubsubService] got local FeedbackRpcAnswer with invalid req_id {rpc_id}");
                     }
                 }
             }

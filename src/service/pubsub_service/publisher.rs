@@ -1,10 +1,16 @@
+use std::time::Duration;
+
 use anyhow::anyhow;
 use derive_more::derive::Display;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 
-use super::{InternalMsg, PeerSrc, PubsubChannelId};
+use super::{InternalMsg, PeerSrc, PubsubChannelId, PubsubRpcError, RpcId};
 
-#[derive(Debug, Display, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Display, Hash, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct PublisherLocalId(u64);
 impl PublisherLocalId {
     pub fn rand() -> Self {
@@ -17,6 +23,7 @@ pub enum PublisherEvent {
     PeerJoined(PeerSrc),
     PeerLeaved(PeerSrc),
     Feedback(Vec<u8>),
+    FeedbackRpc(Vec<u8>, RpcId, String, PeerSrc),
 }
 
 pub struct Publisher {
@@ -41,8 +48,20 @@ impl Publisher {
         }
     }
 
-    pub async fn send(&self, data: Vec<u8>) -> anyhow::Result<()> {
+    pub async fn publish(&self, data: Vec<u8>) -> anyhow::Result<()> {
         self.control_tx.send(InternalMsg::Publish(self.local_id, self.channel_id, data))?;
+        Ok(())
+    }
+
+    pub async fn publish_rpc(&self, method: &str, data: Vec<u8>, timeout: Duration) -> anyhow::Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel::<Result<Vec<u8>, PubsubRpcError>>();
+        self.control_tx.send(InternalMsg::PublishRpc(self.local_id, self.channel_id, data, method.to_owned(), tx, timeout))?;
+        let data = rx.await??;
+        Ok(data)
+    }
+
+    pub async fn answer_feedback_rpc(&self, rpc: RpcId, source: PeerSrc, data: Vec<u8>) -> anyhow::Result<()> {
+        self.control_tx.send(InternalMsg::FeedbackRpcAnswer(rpc, source, data))?;
         Ok(())
     }
 
