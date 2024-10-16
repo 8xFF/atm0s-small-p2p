@@ -131,6 +131,11 @@ impl SubscriberRequester {
         Ok(())
     }
 
+    pub async fn feedback_ob<Ob: Serialize>(&self, ob: &Ob) -> anyhow::Result<()> {
+        let data = bincode::serialize(ob).expect("should serialize");
+        self.feedback(data).await
+    }
+
     pub async fn feedback_rpc(&self, method: &str, data: Vec<u8>, timeout: Duration) -> anyhow::Result<Vec<u8>> {
         let (tx, rx) = oneshot::channel::<Result<Vec<u8>, PubsubRpcError>>();
         self.control_tx.send(InternalMsg::FeedbackRpc(self.local_id, self.channel_id, data, method.to_owned(), tx, timeout))?;

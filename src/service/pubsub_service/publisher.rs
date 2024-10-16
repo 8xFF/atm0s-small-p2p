@@ -131,6 +131,11 @@ impl PublisherRequester {
         Ok(())
     }
 
+    pub async fn publish_ob<Ob: Serialize>(&self, ob: &Ob) -> anyhow::Result<()> {
+        let data = bincode::serialize(ob).expect("should serialize");
+        self.publish(data).await
+    }
+
     pub async fn publish_rpc(&self, method: &str, data: Vec<u8>, timeout: Duration) -> anyhow::Result<Vec<u8>> {
         let (tx, rx) = oneshot::channel::<Result<Vec<u8>, PubsubRpcError>>();
         self.control_tx.send(InternalMsg::PublishRpc(self.local_id, self.channel_id, data, method.to_owned(), tx, timeout))?;
