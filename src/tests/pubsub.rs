@@ -31,13 +31,13 @@ async fn pubsub_local_single_pair_pub_first() {
         PublisherEvent::PeerJoined(PeerSrc::Local)
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -68,13 +68,13 @@ async fn pubsub_local_single_pair_sub_first() {
         PublisherEvent::PeerJoined(PeerSrc::Local)
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -110,7 +110,7 @@ async fn pubsub_local_multi_subs() {
         PublisherEvent::PeerJoined(PeerSrc::Local)
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber1.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
@@ -120,13 +120,13 @@ async fn pubsub_local_multi_subs() {
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber1.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber1.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
     );
 
-    subscriber2.feedback(vec![3, 4, 5]).await.expect("should ok");
+    subscriber2.requester().feedback(vec![3, 4, 5]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![3, 4, 5])
@@ -162,19 +162,19 @@ async fn pubsub_local_multi_pubs() {
         PublisherEvent::PeerJoined(PeerSrc::Local)
     );
 
-    publisher1.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher1.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    publisher2.publish(vec![1, 2, 4]).await.expect("should ok");
+    publisher2.requester().publish(vec![1, 2, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 4])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher1.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -216,13 +216,13 @@ async fn pubsub_remote_single_pair_pub_first() {
         PublisherEvent::PeerJoined(PeerSrc::Remote(addr2.peer_id()))
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -260,13 +260,13 @@ async fn pubsub_remote_single_pair_sub_first() {
         PublisherEvent::PeerJoined(PeerSrc::Remote(addr1.peer_id()))
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -313,7 +313,7 @@ async fn pubsub_remote_multi_subs() {
         PublisherEvent::PeerJoined(PeerSrc::Remote(addr2.peer_id()))
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber1.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
@@ -323,13 +323,13 @@ async fn pubsub_remote_multi_subs() {
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber1.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber1.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
     );
 
-    subscriber2.feedback(vec![3, 4, 5]).await.expect("should ok");
+    subscriber2.requester().feedback(vec![3, 4, 5]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![3, 4, 5])
@@ -376,19 +376,19 @@ async fn pubsub_remote_multi_pubs() {
         PublisherEvent::PeerJoined(PeerSrc::Remote(addr1.peer_id()))
     );
 
-    publisher1.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher1.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    publisher2.publish(vec![1, 2, 4]).await.expect("should ok");
+    publisher2.requester().publish(vec![1, 2, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 4])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher1.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -435,13 +435,13 @@ async fn pubsub_remote_heatbeat_restore() {
         PublisherEvent::PeerJoined(PeerSrc::Remote(addr2.peer_id()))
     );
 
-    publisher.publish(vec![1, 2, 3]).await.expect("should ok");
+    publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::Publish(vec![1, 2, 3])
     );
 
-    subscriber.feedback(vec![2, 3, 4]).await.expect("should ok");
+    subscriber.requester().feedback(vec![2, 3, 4]).await.expect("should ok");
     assert_eq!(
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::Feedback(vec![2, 3, 4])
@@ -479,13 +479,13 @@ async fn pubsub_publish_rpc_local() {
             assert_eq!(data, vec![1, 2, 3]);
             assert_eq!(method, "ping");
             assert_eq!(source, PeerSrc::Local);
-            subscriber.answer_publish_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
+            subscriber.requester().answer_publish_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
         } else {
             panic!("must received SubscriberEvent::PublishRpc");
         }
     });
 
-    let res = publisher.publish_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
+    let res = publisher.requester().publish_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
     assert_eq!(res, vec![2, 3, 4]);
 }
 
@@ -520,13 +520,13 @@ async fn pubsub_feedback_rpc_local() {
             assert_eq!(data, vec![1, 2, 3]);
             assert_eq!(method, "ping");
             assert_eq!(source, PeerSrc::Local);
-            publisher.answer_feedback_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
+            publisher.requester().answer_feedback_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
         } else {
             panic!("must received SubscriberEvent::PublishRpc");
         }
     });
 
-    let res = subscriber.feedback_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
+    let res = subscriber.requester().feedback_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
     assert_eq!(res, vec![2, 3, 4]);
 }
 
@@ -568,13 +568,13 @@ async fn pubsub_publish_rpc_remote() {
             assert_eq!(data, vec![1, 2, 3]);
             assert_eq!(method, "ping");
             assert_eq!(source, PeerSrc::Remote(addr1.peer_id()));
-            subscriber.answer_publish_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
+            subscriber.requester().answer_publish_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
         } else {
             panic!("must received SubscriberEvent::PublishRpc");
         }
     });
 
-    let res = publisher.publish_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
+    let res = publisher.requester().publish_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
     assert_eq!(res, vec![2, 3, 4]);
 }
 
@@ -616,13 +616,13 @@ async fn pubsub_feedback_rpc_remote() {
             assert_eq!(data, vec![1, 2, 3]);
             assert_eq!(method, "ping");
             assert_eq!(source, PeerSrc::Remote(addr2.peer_id()));
-            publisher.answer_feedback_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
+            publisher.requester().answer_feedback_rpc(rpc_id, source, vec![2, 3, 4]).await.expect("should answer");
         } else {
             panic!("must received SubscriberEvent::PublishRpc");
         }
     });
 
-    let res = subscriber.feedback_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
+    let res = subscriber.requester().feedback_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.expect("should ok");
     assert_eq!(res, vec![2, 3, 4]);
 }
 
@@ -637,7 +637,7 @@ async fn pubsub_publish_rpc_no_destination() {
     // we create publisher first
     let channel_id: PubsubChannelId = 1000.into();
     let publisher = service1_requester.publisher(channel_id).await;
-    assert!(publisher.publish_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.is_err());
+    assert!(publisher.requester().publish_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.is_err());
 }
 
 #[test(tokio::test)]
@@ -651,5 +651,5 @@ async fn pubsub_feedback_rpc_no_destination() {
     // we create publisher first
     let channel_id: PubsubChannelId = 1000.into();
     let subscriber = service1_requester.subscriber(channel_id).await;
-    assert!(subscriber.feedback_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.is_err());
+    assert!(subscriber.requester().feedback_rpc("ping", vec![1, 2, 3], Duration::from_secs(1)).await.is_err());
 }

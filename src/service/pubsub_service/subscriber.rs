@@ -40,6 +40,7 @@ pub struct Subscriber {
     local_id: SubscriberLocalId,
     channel_id: PubsubChannelId,
     control_tx: UnboundedSender<InternalMsg>,
+    requester: SubscriberRequester,
     sub_rx: UnboundedReceiver<SubscriberEvent>,
 }
 
@@ -53,37 +54,14 @@ impl Subscriber {
         Self {
             local_id,
             channel_id,
+            control_tx: control_tx.clone(),
+            requester: SubscriberRequester { local_id, channel_id, control_tx },
             sub_rx,
-            control_tx,
         }
     }
 
-    pub async fn feedback(&self, data: Vec<u8>) -> anyhow::Result<()> {
-        self.control_tx.send(InternalMsg::Feedback(self.local_id, self.channel_id, data))?;
-        Ok(())
-    }
-
-    pub async fn feedback_rpc(&self, method: &str, data: Vec<u8>, timeout: Duration) -> anyhow::Result<Vec<u8>> {
-        let (tx, rx) = oneshot::channel::<Result<Vec<u8>, PubsubRpcError>>();
-        self.control_tx.send(InternalMsg::FeedbackRpc(self.local_id, self.channel_id, data, method.to_owned(), tx, timeout))?;
-        let data = rx.await??;
-        Ok(data)
-    }
-
-    pub async fn feedback_rpc_ob<REQ: Serialize, RES: DeserializeOwned>(&self, method: &str, req: &REQ, timeout: Duration) -> anyhow::Result<RES> {
-        let data = bincode::serialize(req).expect("should convert to buffer");
-        let res = self.feedback_rpc(method, data, timeout).await?;
-        Ok(bincode::deserialize(&res)?)
-    }
-
-    pub async fn answer_publish_rpc(&self, rpc: RpcId, source: PeerSrc, data: Vec<u8>) -> anyhow::Result<()> {
-        self.control_tx.send(InternalMsg::PublishRpcAnswer(rpc, source, data))?;
-        Ok(())
-    }
-
-    pub async fn answer_publish_rpc_ob<RES: Serialize>(&self, rpc: RpcId, source: PeerSrc, res: &RES) -> anyhow::Result<()> {
-        self.control_tx.send(InternalMsg::PublishRpcAnswer(rpc, source, bincode::serialize(res).expect("should serialize")))?;
-        Ok(())
+    pub fn requester(&self) -> &SubscriberRequester {
+        &self.requester
     }
 
     pub async fn recv(&mut self) -> anyhow::Result<SubscriberEvent> {
@@ -117,5 +95,42 @@ impl Drop for Subscriber {
     fn drop(&mut self) {
         log::info!("[Subscriber {}/{}] destroy", self.channel_id, self.local_id);
         let _ = self.control_tx.send(InternalMsg::SubscriberDestroyed(self.local_id, self.channel_id));
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriberRequester {
+    local_id: SubscriberLocalId,
+    channel_id: PubsubChannelId,
+    control_tx: UnboundedSender<InternalMsg>,
+}
+
+impl SubscriberRequester {
+    pub async fn feedback(&self, data: Vec<u8>) -> anyhow::Result<()> {
+        self.control_tx.send(InternalMsg::Feedback(self.local_id, self.channel_id, data))?;
+        Ok(())
+    }
+
+    pub async fn feedback_rpc(&self, method: &str, data: Vec<u8>, timeout: Duration) -> anyhow::Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel::<Result<Vec<u8>, PubsubRpcError>>();
+        self.control_tx.send(InternalMsg::FeedbackRpc(self.local_id, self.channel_id, data, method.to_owned(), tx, timeout))?;
+        let data = rx.await??;
+        Ok(data)
+    }
+
+    pub async fn feedback_rpc_ob<REQ: Serialize, RES: DeserializeOwned>(&self, method: &str, req: &REQ, timeout: Duration) -> anyhow::Result<RES> {
+        let data = bincode::serialize(req).expect("should convert to buffer");
+        let res = self.feedback_rpc(method, data, timeout).await?;
+        Ok(bincode::deserialize(&res)?)
+    }
+
+    pub async fn answer_publish_rpc(&self, rpc: RpcId, source: PeerSrc, data: Vec<u8>) -> anyhow::Result<()> {
+        self.control_tx.send(InternalMsg::PublishRpcAnswer(rpc, source, data))?;
+        Ok(())
+    }
+
+    pub async fn answer_publish_rpc_ob<RES: Serialize>(&self, rpc: RpcId, source: PeerSrc, res: &RES) -> anyhow::Result<()> {
+        self.control_tx.send(InternalMsg::PublishRpcAnswer(rpc, source, bincode::serialize(res).expect("should serialize")))?;
+        Ok(())
     }
 }

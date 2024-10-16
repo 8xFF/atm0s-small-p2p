@@ -32,8 +32,8 @@ use super::{P2pService, P2pServiceEvent};
 mod publisher;
 mod subscriber;
 
-pub use publisher::{Publisher, PublisherEvent, PublisherEventOb};
-pub use subscriber::{Subscriber, SubscriberEvent, SubscriberEventOb};
+pub use publisher::{Publisher, PublisherEvent, PublisherEventOb, PublisherRequester};
+pub use subscriber::{Subscriber, SubscriberEvent, SubscriberEventOb, SubscriberRequester};
 
 const HEATBEAT_INTERVAL_MS: u64 = 5_000;
 const RPC_TICK_INTERVAL_MS: u64 = 1_000;
