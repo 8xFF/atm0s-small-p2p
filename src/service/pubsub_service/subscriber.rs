@@ -22,6 +22,8 @@ impl SubscriberLocalId {
 pub enum SubscriberEvent {
     PeerJoined(PeerSrc),
     PeerLeaved(PeerSrc),
+    GuestPublish(Vec<u8>),
+    GuestPublishRpc(Vec<u8>, RpcId, String, PeerSrc),
     Publish(Vec<u8>),
     PublishRpc(Vec<u8>, RpcId, String, PeerSrc),
 }
@@ -34,6 +36,10 @@ pub enum SubscriberEventOb<Fb> {
     PublishDeseializeErr(Vec<u8>),
     PublishRpc(Fb, RpcId, String, PeerSrc),
     PublishRpcDeseializeErr(Vec<u8>, RpcId, String, PeerSrc),
+    GuestPublish(Fb),
+    GuestPublishDeseializeErr(Vec<u8>),
+    GuestPublishRpc(Fb, RpcId, String, PeerSrc),
+    GuestPublishRpcDeseializeErr(Vec<u8>, RpcId, String, PeerSrc),
 }
 
 pub struct Subscriber {
@@ -84,6 +90,20 @@ impl Subscriber {
                     SubscriberEventOb::PublishRpc(ob, rpc_id, method, peer_src)
                 } else {
                     SubscriberEventOb::PublishRpcDeseializeErr(data, rpc_id, method, peer_src)
+                }
+            }
+            SubscriberEvent::GuestPublish(data) => {
+                if let Ok(ob) = bincode::deserialize(&data) {
+                    SubscriberEventOb::GuestPublish(ob)
+                } else {
+                    SubscriberEventOb::GuestPublishDeseializeErr(data)
+                }
+            }
+            SubscriberEvent::GuestPublishRpc(data, rpc_id, method, peer_src) => {
+                if let Ok(ob) = bincode::deserialize(&data) {
+                    SubscriberEventOb::GuestPublishRpc(ob, rpc_id, method, peer_src)
+                } else {
+                    SubscriberEventOb::GuestPublishRpcDeseializeErr(data, rpc_id, method, peer_src)
                 }
             }
         };

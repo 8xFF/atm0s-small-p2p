@@ -24,6 +24,8 @@ pub enum PublisherEvent {
     PeerLeaved(PeerSrc),
     Feedback(Vec<u8>),
     FeedbackRpc(Vec<u8>, RpcId, String, PeerSrc),
+    GuestFeedback(Vec<u8>),
+    GuestFeedbackRpc(Vec<u8>, RpcId, String, PeerSrc),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,6 +36,10 @@ pub enum PublisherEventOb<Fb> {
     FeedbackDeseializeErr(Vec<u8>),
     FeedbackRpc(Fb, RpcId, String, PeerSrc),
     FeedbackRpcDeseializeErr(Vec<u8>, RpcId, String, PeerSrc),
+    GuestFeedback(Fb),
+    GuestFeedbackDeseializeErr(Vec<u8>),
+    GuestFeedbackRpc(Fb, RpcId, String, PeerSrc),
+    GuestFeedbackRpcDeseializeErr(Vec<u8>, RpcId, String, PeerSrc),
 }
 
 pub struct Publisher {
@@ -84,6 +90,20 @@ impl Publisher {
                     PublisherEventOb::FeedbackRpc(ob, rpc_id, method, peer_src)
                 } else {
                     PublisherEventOb::FeedbackRpcDeseializeErr(data, rpc_id, method, peer_src)
+                }
+            }
+            PublisherEvent::GuestFeedback(data) => {
+                if let Ok(ob) = bincode::deserialize(&data) {
+                    PublisherEventOb::GuestFeedback(ob)
+                } else {
+                    PublisherEventOb::GuestFeedbackDeseializeErr(data)
+                }
+            }
+            PublisherEvent::GuestFeedbackRpc(data, rpc_id, method, peer_src) => {
+                if let Ok(ob) = bincode::deserialize(&data) {
+                    PublisherEventOb::GuestFeedbackRpc(ob, rpc_id, method, peer_src)
+                } else {
+                    PublisherEventOb::GuestFeedbackRpcDeseializeErr(data, rpc_id, method, peer_src)
                 }
             }
         };

@@ -13,7 +13,7 @@ use std::{
 use anyhow::anyhow;
 use derive_more::derive::{Display, From};
 use publisher::PublisherLocalId;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use subscriber::SubscriberLocalId;
 use thiserror::Error;
 use tokio::{
@@ -87,6 +87,8 @@ enum PubsubMessage {
     SubscriberJoined(PubsubChannelId),
     SubscriberLeaved(PubsubChannelId),
     Heatbeat(Vec<ChannelHeatbeat>),
+    GuestPublish(PubsubChannelId, Vec<u8>),
+    GuestPublishRpc(PubsubChannelId, Vec<u8>, RpcId, String),
     Publish(PubsubChannelId, Vec<u8>),
     PublishRpc(PubsubChannelId, Vec<u8>, RpcId, String),
     PublishRpcAnswer(Vec<u8>, RpcId),
@@ -100,6 +102,8 @@ enum InternalMsg {
     PublisherDestroyed(PublisherLocalId, PubsubChannelId),
     SubscriberCreated(SubscriberLocalId, PubsubChannelId, UnboundedSender<SubscriberEvent>),
     SubscriberDestroyed(SubscriberLocalId, PubsubChannelId),
+    GuestPublish(PubsubChannelId, Vec<u8>),
+    GuestPublishRpc(PubsubChannelId, Vec<u8>, String, oneshot::Sender<Result<Vec<u8>, PubsubRpcError>>, Duration),
     Publish(PublisherLocalId, PubsubChannelId, Vec<u8>),
     PublishRpc(PublisherLocalId, PubsubChannelId, Vec<u8>, String, oneshot::Sender<Result<Vec<u8>, PubsubRpcError>>, Duration),
     PublishRpcAnswer(RpcId, PeerSrc, Vec<u8>),
@@ -285,6 +289,20 @@ impl PubsubService {
                                 }
                             }
                         }
+                        PubsubMessage::GuestPublish(channel, data) => {
+                            if let Some(state) = self.channels.get(&channel) {
+                                for (_, sub_tx) in state.local_subscribers.iter() {
+                                    let _ = sub_tx.send(SubscriberEvent::GuestPublish(data.clone()));
+                                }
+                            }
+                        }
+                        PubsubMessage::GuestPublishRpc(channel, data, rpc_id, method) => {
+                            if let Some(state) = self.channels.get(&channel) {
+                                for (_, sub_tx) in state.local_subscribers.iter() {
+                                    let _ = sub_tx.send(SubscriberEvent::GuestPublishRpc(data.clone(), rpc_id, method.clone(), PeerSrc::Remote(from_peer)));
+                                }
+                            }
+                        }
                         PubsubMessage::Publish(channel, vec) => {
                             if let Some(state) = self.channels.get(&channel) {
                                 for (_, sub_tx) in state.local_subscribers.iter() {
@@ -393,6 +411,41 @@ impl PubsubService {
                     }
                 }
                 self.broadcast(&PubsubMessage::SubscriberLeaved(channel)).await;
+            }
+            InternalMsg::GuestPublish(channel, vec) => {
+                if let Some(state) = self.channels.get(&channel) {
+                    for (_, sub_tx) in state.local_subscribers.iter() {
+                        let _ = sub_tx.send(SubscriberEvent::GuestPublish(vec.clone()));
+                    }
+                    for sub_peer in state.remote_subscribers.iter() {
+                        let _ = self.send_to(*sub_peer, &PubsubMessage::GuestPublish(channel, vec.clone())).await;
+                    }
+                }
+            }
+            InternalMsg::GuestPublishRpc(channel, data, method, tx, timeout) => {
+                if let Some(state) = self.channels.get(&channel) {
+                    let req_id = RpcId::rand();
+                    if state.local_subscribers.is_empty() && state.remote_subscribers.is_empty() {
+                        let _ = tx.send(Err(PubsubRpcError::NoDestination));
+                    } else {
+                        for (_, pub_tx) in state.local_subscribers.iter() {
+                            let _ = pub_tx.send(SubscriberEvent::GuestPublishRpc(data.clone(), req_id, method.clone(), PeerSrc::Local));
+                        }
+                        for pub_peer in state.remote_subscribers.iter() {
+                            let _ = self.send_to(*pub_peer, &PubsubMessage::GuestPublishRpc(channel, data.clone(), req_id, method.clone())).await;
+                        }
+                        self.publish_rpc_reqs.insert(
+                            req_id,
+                            PublishRpcReq {
+                                started_at: Instant::now(),
+                                timeout,
+                                tx: Some(tx),
+                            },
+                        );
+                    }
+                } else {
+                    let _ = tx.send(Err(PubsubRpcError::NoDestination));
+                }
             }
             InternalMsg::Publish(_local_id, channel, vec) => {
                 if let Some(state) = self.channels.get(&channel) {
@@ -503,6 +556,29 @@ impl PubsubService {
 }
 
 impl PubsubServiceRequester {
+    pub async fn publish_as_guest(&self, channel: PubsubChannelId, data: Vec<u8>) -> anyhow::Result<()> {
+        self.internal_tx.send(InternalMsg::GuestPublish(channel, data))?;
+        Ok(())
+    }
+
+    pub async fn publish_as_guest_ob<Ob: Serialize>(&self, channel: PubsubChannelId, ob: Ob) -> anyhow::Result<()> {
+        let data = bincode::serialize(&ob).expect("should serialize");
+        self.publish_as_guest(channel, data).await
+    }
+
+    pub async fn publish_rpc_as_guest(&self, channel: PubsubChannelId, method: &str, data: Vec<u8>, timeout: Duration) -> anyhow::Result<Vec<u8>> {
+        let (tx, rx) = oneshot::channel::<Result<Vec<u8>, PubsubRpcError>>();
+        self.internal_tx.send(InternalMsg::GuestPublishRpc(channel, data, method.to_owned(), tx, timeout))?;
+        let data = rx.await??;
+        Ok(data)
+    }
+
+    pub async fn publish_rpc_as_guest_ob<REQ: Serialize, RES: DeserializeOwned>(&self, channel: PubsubChannelId, method: &str, req: REQ, timeout: Duration) -> anyhow::Result<RES> {
+        let data = bincode::serialize(&req).expect("should serialize");
+        let res = self.publish_rpc_as_guest(channel, method, data, timeout).await?;
+        Ok(bincode::deserialize(&res)?)
+    }
+
     pub async fn publisher(&self, channel: PubsubChannelId) -> Publisher {
         Publisher::build(channel, self.internal_tx.clone())
     }
