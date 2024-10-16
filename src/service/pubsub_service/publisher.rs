@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use derive_more::derive::Display;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -24,6 +24,16 @@ pub enum PublisherEvent {
     PeerLeaved(PeerSrc),
     Feedback(Vec<u8>),
     FeedbackRpc(Vec<u8>, RpcId, String, PeerSrc),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PublisherEventOb<Fb> {
+    PeerJoined(PeerSrc),
+    PeerLeaved(PeerSrc),
+    Feedback(Fb),
+    FeedbackDeseializeErr(Vec<u8>),
+    FeedbackRpc(Fb, RpcId, String, PeerSrc),
+    FeedbackRpcDeseializeErr(Vec<u8>, RpcId, String, PeerSrc),
 }
 
 pub struct Publisher {
@@ -60,13 +70,46 @@ impl Publisher {
         Ok(data)
     }
 
+    pub async fn publish_rpc_ob<REQ: Serialize, RES: DeserializeOwned>(&self, method: &str, req: &REQ, timeout: Duration) -> anyhow::Result<RES> {
+        let data = bincode::serialize(req).expect("should convert to buffer");
+        let res = self.publish_rpc(method, data, timeout).await?;
+        Ok(bincode::deserialize(&res)?)
+    }
+
     pub async fn answer_feedback_rpc(&self, rpc: RpcId, source: PeerSrc, data: Vec<u8>) -> anyhow::Result<()> {
         self.control_tx.send(InternalMsg::FeedbackRpcAnswer(rpc, source, data))?;
         Ok(())
     }
 
+    pub async fn answer_feedback_rpc_ob<RES: Serialize>(&self, rpc: RpcId, source: PeerSrc, res: &RES) -> anyhow::Result<()> {
+        self.control_tx.send(InternalMsg::FeedbackRpcAnswer(rpc, source, bincode::serialize(res).expect("should serialize")))?;
+        Ok(())
+    }
+
     pub async fn recv(&mut self) -> anyhow::Result<PublisherEvent> {
         self.pub_rx.recv().await.ok_or_else(|| anyhow!("internal channel error"))
+    }
+
+    pub async fn recv_ob<Fb: DeserializeOwned>(&mut self) -> anyhow::Result<PublisherEventOb<Fb>> {
+        let event = match self.recv().await? {
+            PublisherEvent::PeerJoined(peer_src) => PublisherEventOb::PeerJoined(peer_src),
+            PublisherEvent::PeerLeaved(peer_src) => PublisherEventOb::PeerLeaved(peer_src),
+            PublisherEvent::Feedback(data) => {
+                if let Ok(ob) = bincode::deserialize(&data) {
+                    PublisherEventOb::Feedback(ob)
+                } else {
+                    PublisherEventOb::FeedbackDeseializeErr(data)
+                }
+            }
+            PublisherEvent::FeedbackRpc(data, rpc_id, method, peer_src) => {
+                if let Ok(ob) = bincode::deserialize(&data) {
+                    PublisherEventOb::FeedbackRpc(ob, rpc_id, method, peer_src)
+                } else {
+                    PublisherEventOb::FeedbackRpcDeseializeErr(data, rpc_id, method, peer_src)
+                }
+            }
+        };
+        Ok(event)
     }
 }
 
