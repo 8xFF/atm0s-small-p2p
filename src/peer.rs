@@ -181,11 +181,8 @@ async fn run_connection<SECURE: HandshakeProtocol>(
     ctx.register_conn(conn_id, alias);
     internal_tx.send(InternalEvent::PeerConnected(conn_id, to_id, rtt_ms)).await.expect("should send to main");
     log::info!("[PeerConnection {conn_id}] run loop for {remote}");
-    loop {
-        if let Err(e) = internal.recv_complex().await {
-            log::error!("[PeerConnection {conn_id}] {remote} error {e}");
-            break;
-        }
+    if let Err(e) = internal.run_loop().await {
+        log::error!("[PeerConnection {conn_id}] {remote} error {e}");
     }
     internal_tx.send(InternalEvent::PeerDisconnected(conn_id, to_id)).await.expect("should send to main");
     log::info!("[PeerConnection {conn_id}] end loop for {remote}");

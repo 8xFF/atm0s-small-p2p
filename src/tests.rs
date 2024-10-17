@@ -7,6 +7,7 @@ use crate::{P2pNetwork, P2pNetworkConfig, PeerAddress, PeerId, SharedKeyHandshak
 mod alias;
 mod cross_nodes;
 mod discovery;
+mod pubsub;
 mod visualization;
 
 pub const DEFAULT_CLUSTER_CERT: &[u8] = include_bytes!("../certs/dev.cluster.cert");

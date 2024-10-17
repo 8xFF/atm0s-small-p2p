@@ -67,26 +67,26 @@ impl PeerConnectionInternal {
         }
     }
 
-    pub async fn recv_complex(&mut self) -> anyhow::Result<()> {
-        select! {
-            _ = self.ticker.tick() => {
-                let rtt_ms = self.connection.rtt().as_millis().min(u16::MAX as u128) as u16;
-                self.ctx.router().set_direct(self.conn_id, self.to_id, rtt_ms);
-                Ok(())
-            },
-            open = self.connection.accept_bi() => {
-                let (send, recv) = open?;
-                self.on_accept_bi(send, recv).await?;
-                Ok(())
-            },
-            frame = self.framed.next() => {
-                let msg = frame.ok_or(anyhow!("peer main stream ended"))??;
-                self.on_msg(msg).await
-            },
-            control = self.control_rx.recv() => {
-                let control = control.ok_or(anyhow!("peer control channel ended"))?;
-                self.on_control(control).await
-            },
+    pub async fn run_loop(&mut self) -> anyhow::Result<()> {
+        loop {
+            select! {
+                _ = self.ticker.tick() => {
+                    let rtt_ms = self.connection.rtt().as_millis().min(u16::MAX as u128) as u16;
+                    self.ctx.router().set_direct(self.conn_id, self.to_id, rtt_ms);
+                },
+                open = self.connection.accept_bi() => {
+                    let (send, recv) = open?;
+                    self.on_accept_bi(send, recv).await?;
+                },
+                frame = self.framed.next() => {
+                    let msg = frame.ok_or(anyhow!("peer main stream ended"))??;
+                    self.on_msg(msg).await?;
+                },
+                control = self.control_rx.recv() => {
+                    let control = control.ok_or(anyhow!("peer control channel ended"))?;
+                    self.on_control(control).await?;
+                },
+            }
         }
     }
 

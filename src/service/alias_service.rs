@@ -165,30 +165,28 @@ impl AliasService {
         AliasServiceRequester { tx: self.tx.clone() }
     }
 
-    pub async fn recv(&mut self) -> anyhow::Result<()> {
-        select! {
-            _ = self.interval.tick() => {
-                self.on_tick().await;
-                Ok(())
-            },
-            event = self.service.recv() => match event.expect("service channel should work") {
-                P2pServiceEvent::Unicast(from, data) => {
-                    if let Ok(msg) = bincode::deserialize::<AliasMessage>(&data) {
-                        self.on_msg(from, msg).await;
+    pub async fn run_loop(&mut self) -> anyhow::Result<()> {
+        loop {
+            select! {
+                _ = self.interval.tick() => {
+                    self.on_tick().await;
+                },
+                event = self.service.recv() => match event.expect("service channel should work") {
+                    P2pServiceEvent::Unicast(from, data) => {
+                        if let Ok(msg) = bincode::deserialize::<AliasMessage>(&data) {
+                            self.on_msg(from, msg).await;
+                        }
                     }
-                    Ok(())
-                }
-                P2pServiceEvent::Broadcast(from, data) => {
-                    if let Ok(msg) = bincode::deserialize::<AliasMessage>(&data) {
-                        self.on_msg(from, msg).await;
+                    P2pServiceEvent::Broadcast(from, data) => {
+                        if let Ok(msg) = bincode::deserialize::<AliasMessage>(&data) {
+                            self.on_msg(from, msg).await;
+                        }
                     }
-                    Ok(())
+                    P2pServiceEvent::Stream(..) => {},
+                },
+                control = self.rx.recv() => {
+                    self.on_control(control.expect("service channel should work")).await;
                 }
-                P2pServiceEvent::Stream(..) => Ok(()),
-            },
-            control = self.rx.recv() => {
-                self.on_control(control.expect("service channel should work")).await;
-                Ok(())
             }
         }
     }
