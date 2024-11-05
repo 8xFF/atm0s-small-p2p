@@ -13,7 +13,7 @@ impl NetworkNeighbours {
     }
 
     pub fn has_peer(&self, peer: &PeerId) -> bool {
-        self.conns.values().find(|c| c.peer_id().eq(&Some(*peer))).is_some()
+        self.conns.values().any(|c| c.peer_id().eq(&Some(*peer)))
     }
 
     pub fn mark_connected(&mut self, conn_id: &ConnectionId, peer: PeerId) -> Option<()> {
@@ -22,11 +22,11 @@ impl NetworkNeighbours {
     }
 
     pub fn remove(&mut self, conn_id: &ConnectionId) -> Option<()> {
-        self.conns.remove(&conn_id)?;
+        self.conns.remove(conn_id)?;
         Some(())
     }
 
     pub fn connected_conns(&self) -> impl Iterator<Item = &PeerConnection> {
-        self.conns.values().into_iter().filter(|c| c.is_connected())
+        self.conns.values().filter(|c| c.is_connected())
     }
 }

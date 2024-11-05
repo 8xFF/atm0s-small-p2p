@@ -256,7 +256,7 @@ impl PubsubService {
                                     }
                                     // we also send publisher state it remote, as subscriber it only care about wherever this node is a publisher
                                     if !state.local_publishers.is_empty() {
-                                        self.send_to(from_peer, &&PubsubMessage::PublisherJoined(channel)).await;
+                                        self.send_to(from_peer, &PubsubMessage::PublisherJoined(channel)).await;
                                     }
                                 }
                             }
@@ -574,6 +574,7 @@ impl PubsubService {
                 if let PeerSrc::Remote(peer) = peer_src {
                     let _ = self.send_to(peer, &PubsubMessage::PublishRpcAnswer(data, rpc_id)).await;
                 } else {
+                    #[allow(clippy::collapsible_if)]
                     if let Some(mut req) = self.publish_rpc_reqs.remove(&rpc_id) {
                         let _ = req.tx.take().expect("should have req_tx").send(Ok(data));
                     } else {
@@ -585,6 +586,7 @@ impl PubsubService {
                 if let PeerSrc::Remote(peer) = peer_src {
                     let _ = self.send_to(peer, &PubsubMessage::FeedbackRpcAnswer(data, rpc_id)).await;
                 } else {
+                    #[allow(clippy::collapsible_if)]
                     if let Some(mut req) = self.feedback_rpc_reqs.remove(&rpc_id) {
                         let _ = req.tx.take().expect("should have req_tx").send(Ok(data));
                     } else {

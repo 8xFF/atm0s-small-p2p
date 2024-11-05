@@ -49,6 +49,6 @@ impl PeerConnectionAlias {
     pub(crate) async fn open_stream(&self, service: P2pServiceId, source: PeerId, dest: PeerId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
         let (tx, rx) = oneshot::channel();
         self.control_tx.send(PeerConnectionControl::OpenStream(service, source, dest, meta, tx)).await?;
-        Ok(rx.await??)
+        rx.await?
     }
 }

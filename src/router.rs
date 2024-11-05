@@ -79,7 +79,7 @@ impl RouterTable {
             self.peers.entry(*peer).or_default();
         }
 
-        let mut new_paths = BTreeMap::<PeerId, PathMetric>::from_iter(sync.0.into_iter());
+        let mut new_paths = BTreeMap::<PeerId, PathMetric>::from_iter(sync.0);
         // only loop over peer which don't equal source, because it is direct connection
         for (peer, memory) in self.peers.iter_mut().filter(|(p, _)| !from_peer.eq(p)) {
             let previous = memory.paths.contains_key(&conn);
@@ -121,7 +121,7 @@ impl RouterTable {
     fn del_direct(&mut self, conn: &ConnectionId) {
         if let Some((to, _)) = self.directs.remove(conn) {
             if let Some(memory) = self.peers.get_mut(&to) {
-                memory.paths.remove(&conn);
+                memory.paths.remove(conn);
                 Self::select_best_for(&to, memory);
                 if memory.best().is_none() {
                     self.peers.remove(&to);
@@ -225,7 +225,7 @@ impl SharedRouterTable {
     }
 
     pub fn create_sync(&self, dest: &PeerId) -> RouterTableSync {
-        self.table.read().create_sync(&dest)
+        self.table.read().create_sync(dest)
     }
 
     pub fn apply_sync(&self, conn: ConnectionId, sync: RouterTableSync) {
