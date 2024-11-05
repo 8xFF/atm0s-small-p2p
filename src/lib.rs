@@ -216,7 +216,7 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
     fn process_tick(&mut self, now_ms: u64) -> anyhow::Result<P2pNetworkEvent> {
         self.discovery.clear_timeout(now_ms);
         for conn in self.neighbours.connected_conns() {
-            let peer_id = conn.peer_id().expect("conected neighbours should have peer_id");
+            let peer_id = conn.peer_id().expect("accepted neighbours should have peer_id");
             let conn_id = conn.conn_id();
             let route: router::RouterTableSync = self.router.create_sync(&peer_id);
             let advertise = self.discovery.create_sync_for(now_ms, &peer_id);

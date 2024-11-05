@@ -3,7 +3,7 @@
 //! We have some strict rules
 //!
 //! - Only use async with current connection stream
-//! - For other communication shoud use try_send for avoding blocking
+//! - For other communication should use try_send for avoiding blocking
 
 use std::{net::SocketAddr, time::Duration};
 
@@ -186,7 +186,7 @@ async fn accept_bi(to_peer: PeerId, mut stream: P2pQuicStream, ctx: SharedCtx) -
                 service_tx
                     .send(P2pServiceEvent::Stream(source, meta, stream))
                     .await
-                    .print_on_err("[PeerConnectionInternal] send accpeted stream to service");
+                    .print_on_err("[PeerConnectionInternal] send accepted stream to service");
                 Ok(())
             } else {
                 log::warn!("[PeerConnectionInternal {to_peer}] stream service {service} source {source} to dest {dest} => service not found");

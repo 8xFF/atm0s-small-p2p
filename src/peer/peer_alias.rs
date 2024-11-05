@@ -1,5 +1,5 @@
 //! PeerAlias allow control a peer-connection from othert task
-//! This is done by using control_tx to send control to running task over chanel
+//! This is done by using control_tx to send control to running task over channel
 
 use tokio::sync::{mpsc::Sender, oneshot};
 
