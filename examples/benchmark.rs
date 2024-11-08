@@ -48,8 +48,8 @@ async fn main() {
     let service1 = node1.create_service(0.into());
     let mut service2 = node2.create_service(0.into());
 
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 
