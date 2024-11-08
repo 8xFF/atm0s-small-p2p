@@ -8,11 +8,11 @@ use test_log::test;
 async fn discovery_remain_node() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     log::info!("created node1 {addr1}");
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1]).await;
     log::info!("created node2 {addr2}");
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     let (mut node3, addr3) = create_node(false, 3, vec![addr2]).await;
     log::info!("created node3 {addr3}");

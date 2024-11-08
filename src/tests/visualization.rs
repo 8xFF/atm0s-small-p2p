@@ -10,12 +10,12 @@ use super::create_node;
 async fn discovery_new_node() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = VisualizationService::new(None, false, node1.create_service(0.into()));
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { while let Ok(_) = service1.recv().await {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = VisualizationService::new(Some(Duration::from_secs(1)), false, node2.create_service(0.into()));
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 

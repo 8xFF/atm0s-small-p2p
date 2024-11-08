@@ -10,11 +10,11 @@ use super::create_node;
 async fn send_direct() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = node1.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = node2.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -32,11 +32,11 @@ async fn send_error() {
     // without connect 2 peers, it should error to send data
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let service1 = node1.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![]).await;
     let service2 = node2.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     let data = "from_node1".as_bytes().to_vec();
     assert!(service1.send_unicast(addr2.peer_id(), data.clone()).await.is_err());
@@ -49,16 +49,16 @@ async fn send_error() {
 async fn send_relay() {
     let (mut node1, addr1) = create_node(false, 1, vec![]).await;
     let mut service1 = node1.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![]).await;
     let node2_requester = node2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     let (mut node3, addr3) = create_node(false, 3, vec![]).await;
     let node3_requester = node3.requester();
     let mut service3 = node3.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node3.recv().await {} });
+    tokio::spawn(async move { while node3.recv().await.is_ok() {} });
 
     node2_requester.connect(addr1.clone()).await.expect("should connect success");
     node3_requester.connect(addr2).await.expect("should connect success");
@@ -78,11 +78,11 @@ async fn send_relay() {
 async fn broadcast_direct() {
     let (mut node1, addr1) = create_node(false, 1, vec![]).await;
     let mut service1 = node1.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = node2.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -101,15 +101,15 @@ async fn broadcast_direct() {
 async fn broadcast_relay() {
     let (mut node1, addr1) = create_node(false, 1, vec![]).await;
     let mut service1 = node1.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = node2.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
 
     let (mut node3, addr3) = create_node(false, 3, vec![addr2.clone()]).await;
     let mut service3 = node3.create_service(0.into());
-    tokio::spawn(async move { while let Ok(_) = node3.recv().await {} });
+    tokio::spawn(async move { while node3.recv().await.is_ok() {} });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 

@@ -12,7 +12,7 @@ async fn pubsub_local_single_pair_pub_first() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -49,7 +49,7 @@ async fn pubsub_local_single_pair_sub_first() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -86,7 +86,7 @@ async fn pubsub_local_multi_subs() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -138,7 +138,7 @@ async fn pubsub_local_multi_pubs() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -190,13 +190,13 @@ async fn pubsub_remote_single_pair_pub_first() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -234,13 +234,13 @@ async fn pubsub_remote_single_pair_sub_first() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     let ttl = Duration::from_secs(1);
@@ -278,13 +278,13 @@ async fn pubsub_remote_multi_subs() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     let ttl = Duration::from_secs(1);
@@ -341,13 +341,13 @@ async fn pubsub_remote_multi_pubs() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     let ttl = Duration::from_secs(1);
@@ -404,13 +404,13 @@ async fn pubsub_remote_heatbeat_restore() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     // we create publisher first
@@ -453,7 +453,7 @@ async fn pubsub_publish_rpc_local() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -494,7 +494,7 @@ async fn pubsub_feedback_rpc_local() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -535,13 +535,13 @@ async fn pubsub_publish_rpc_remote() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -583,13 +583,13 @@ async fn pubsub_feedback_rpc_remote() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = PubsubService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -631,7 +631,7 @@ async fn pubsub_publish_rpc_no_destination() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first
@@ -645,7 +645,7 @@ async fn pubsub_feedback_rpc_no_destination() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we create publisher first

@@ -11,7 +11,7 @@ async fn alias_guard() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = AliasService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we register alias before connect
@@ -31,7 +31,7 @@ async fn alias_multi_guards() {
     let (mut node1, _addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = AliasService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     // we register alias before connect
@@ -56,13 +56,13 @@ async fn alias_scan() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = AliasService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, _addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = AliasService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     // we register alias before connect
@@ -78,13 +78,13 @@ async fn alias_hint() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = AliasService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, _addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = AliasService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -102,13 +102,13 @@ async fn alias_hint() {
 async fn alias_timeout() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = AliasService::new(node1.create_service(0.into()));
-    tokio::spawn(async move { while let Ok(_) = node1.recv().await {} });
+    tokio::spawn(async move { while node1.recv().await.is_ok() {} });
     tokio::spawn(async move { service1.run_loop().await });
 
     let (mut node2, _addr2) = create_node(false, 2, vec![addr1.clone()]).await;
     let mut service2 = AliasService::new(node2.create_service(0.into()));
     let service2_requester = service2.requester();
-    tokio::spawn(async move { while let Ok(_) = node2.recv().await {} });
+    tokio::spawn(async move { while node2.recv().await.is_ok() {} });
     tokio::spawn(async move { service2.run_loop().await });
 
     tokio::time::sleep(Duration::from_secs(1)).await;
