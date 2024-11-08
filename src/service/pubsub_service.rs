@@ -371,6 +371,7 @@ impl PubsubService {
         }
     }
 
+    #[allow(clippy::collapsible_else_if)]
     async fn on_internal(&mut self, control: InternalMsg) -> anyhow::Result<()> {
         match control {
             InternalMsg::PublisherCreated(local_id, channel, tx) => {
