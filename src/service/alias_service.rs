@@ -259,7 +259,7 @@ impl AliasServiceInternal {
         log::info!("[AliasServiceInternal] on msg from {from}, {msg:?}");
         match msg {
             AliasMessage::NotifySet(alias_id) => {
-                let slot = self.cache.get_or_insert_mut(alias_id, || HashSet::new());
+                let slot = self.cache.get_or_insert_mut(alias_id, HashSet::new);
                 slot.insert(from);
             }
             AliasMessage::NotifyDel(alias_id) => {
@@ -283,7 +283,7 @@ impl AliasServiceInternal {
                 }
             }
             AliasMessage::Found(alias_id) => {
-                let slot = self.cache.get_or_insert_mut(alias_id, || HashSet::new());
+                let slot = self.cache.get_or_insert_mut(alias_id, HashSet::new);
                 slot.insert(from);
 
                 if let Some(req) = self.find_reqs.remove(&alias_id) {

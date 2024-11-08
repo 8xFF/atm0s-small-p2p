@@ -256,7 +256,7 @@ impl PubsubService {
                                     }
                                     // we also send publisher state it remote, as subscriber it only care about whereever this node is a publisher
                                     if !state.local_publishers.is_empty() {
-                                        self.send_to(from_peer, &&PubsubMessage::PublisherJoined(channel)).await;
+                                        self.send_to(from_peer, &PubsubMessage::PublisherJoined(channel)).await;
                                     }
                                 }
                             }

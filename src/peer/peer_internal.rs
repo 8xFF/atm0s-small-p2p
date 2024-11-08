@@ -42,6 +42,7 @@ pub struct PeerConnectionInternal {
 }
 
 impl PeerConnectionInternal {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: SharedCtx,
         conn_id: ConnectionId,

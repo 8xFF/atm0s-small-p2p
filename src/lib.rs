@@ -108,6 +108,7 @@ enum PeerMainData {
     Sync { route: RouterTableSync, advertise: PeerDiscoverySync },
 }
 
+#[allow(clippy::enum_variant_names)]
 enum InternalEvent {
     PeerConnected(ConnectionId, PeerId, u16),
     PeerConnectError(ConnectionId, Option<PeerId>, anyhow::Error),

@@ -124,6 +124,7 @@ struct ConnectRes {
     result: Result<Vec<u8>, String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_connection<SECURE: HandshakeProtocol>(
     secure: Arc<SECURE>,
     ctx: SharedCtx,
