@@ -1,6 +1,6 @@
 [package]
 name = "atm0s-small-p2p"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A lightweight peer-to-peer network utilizing the atm0s routing mechanism, built entirely with async programming and QUIC (using the quinn library)."
 license = "MIT"
