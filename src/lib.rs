@@ -103,13 +103,15 @@ impl FromStr for PeerAddress {
     }
 }
 
+pub const CERT_DOMAIN_NAME: &str = "cluster";
+
 #[derive(Debug)]
 enum PeerMainData {
     Sync { route: RouterTableSync, advertise: PeerDiscoverySync },
 }
 
 #[allow(clippy::enum_variant_names)]
-enum InternalEvent {
+enum MainEvent {
     PeerConnected(ConnectionId, PeerId, u16),
     PeerConnectError(ConnectionId, Option<PeerId>, anyhow::Error),
     PeerData(ConnectionId, PeerId, PeerMainData),
@@ -143,8 +145,8 @@ pub struct P2pNetwork<SECURE> {
     endpoint: Endpoint,
     control_tx: UnboundedSender<ControlCmd>,
     control_rx: UnboundedReceiver<ControlCmd>,
-    internal_tx: Sender<InternalEvent>,
-    internal_rx: Receiver<InternalEvent>,
+    main_tx: Sender<MainEvent>,
+    main_rx: Receiver<MainEvent>,
     neighbours: NetworkNeighbours,
     ticker: Interval,
     router: SharedRouterTable,
@@ -157,7 +159,7 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
     pub async fn new(cfg: P2pNetworkConfig<SECURE>) -> anyhow::Result<Self> {
         log::info!("[P2pNetwork] starting node {}@{}", cfg.peer_id, cfg.listen_addr);
         let endpoint = make_server_endpoint(cfg.listen_addr, cfg.priv_key, cfg.cert)?;
-        let (internal_tx, internal_rx) = channel(10);
+        let (main_tx, main_rx) = channel(10);
         let (control_tx, control_rx) = unbounded_channel();
         let mut discovery = PeerDiscovery::new(cfg.seeds);
         let router = SharedRouterTable::new(cfg.peer_id);
@@ -170,8 +172,8 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
             local_id: cfg.peer_id,
             endpoint,
             neighbours: NetworkNeighbours::default(),
-            internal_tx,
-            internal_rx,
+            main_tx,
+            main_rx,
             control_tx,
             control_rx,
             ticker: tokio::time::interval(Duration::from_millis(cfg.tick_ms)),
@@ -200,7 +202,7 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
             connecting = self.endpoint.accept() => {
                 self.process_incoming(connecting.ok_or(anyhow!("quic crash"))?)
             },
-            event = self.internal_rx.recv() => {
+            event = self.main_rx.recv() => {
                 self.process_internal(now_ms(), event.ok_or(anyhow!("internal channel crash"))?)
             },
             event = self.control_rx.recv() => {
@@ -236,20 +238,20 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
     fn process_incoming(&mut self, incoming: Incoming) -> anyhow::Result<P2pNetworkEvent> {
         let remote = incoming.remote_address();
         log::info!("[P2pNetwork] incoming connect from {remote} => accept");
-        let conn = PeerConnection::new_incoming(self.secure.clone(), self.local_id, incoming, self.internal_tx.clone(), self.ctx.clone());
+        let conn = PeerConnection::new_incoming(self.secure.clone(), self.local_id, incoming, self.main_tx.clone(), self.ctx.clone());
         self.neighbours.insert(conn.conn_id(), conn);
         Ok(P2pNetworkEvent::Continue)
     }
 
-    fn process_internal(&mut self, now_ms: u64, event: InternalEvent) -> anyhow::Result<P2pNetworkEvent> {
+    fn process_internal(&mut self, now_ms: u64, event: MainEvent) -> anyhow::Result<P2pNetworkEvent> {
         match event {
-            InternalEvent::PeerConnected(conn, peer, ttl_ms) => {
+            MainEvent::PeerConnected(conn, peer, ttl_ms) => {
                 log::info!("[P2pNetwork] connection {conn} connected to {peer}");
                 self.router.set_direct(conn, peer, ttl_ms);
                 self.neighbours.mark_connected(&conn, peer);
                 Ok(P2pNetworkEvent::PeerConnected(conn, peer))
             }
-            InternalEvent::PeerData(conn, peer, data) => {
+            MainEvent::PeerData(conn, peer, data) => {
                 log::debug!("[P2pNetwork] connection {conn} on data {data:?} from {peer}");
                 match data {
                     PeerMainData::Sync { route, advertise } => {
@@ -259,11 +261,11 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
                 }
                 Ok(P2pNetworkEvent::Continue)
             }
-            InternalEvent::PeerConnectError(conn, peer, err) => {
+            MainEvent::PeerConnectError(conn, peer, err) => {
                 log::error!("[P2pNetwork] connection {conn} outgoing: {peer:?} error {err}");
                 Ok(P2pNetworkEvent::Continue)
             }
-            InternalEvent::PeerDisconnected(conn, peer) => {
+            MainEvent::PeerDisconnected(conn, peer) => {
                 log::info!("[P2pNetwork] connection {conn} disconnected from {peer}");
                 self.router.del_direct(&conn);
                 self.neighbours.remove(&conn);
@@ -279,9 +281,9 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
                     Ok(())
                 } else {
                     log::info!("[P2pNetwork] connecting to {addr}");
-                    match self.endpoint.connect(*addr.network_address().deref(), "cluster") {
+                    match self.endpoint.connect(*addr.network_address().deref(), CERT_DOMAIN_NAME) {
                         Ok(connecting) => {
-                            let conn = PeerConnection::new_connecting(self.secure.clone(), self.local_id, addr.peer_id(), connecting, self.internal_tx.clone(), self.ctx.clone());
+                            let conn = PeerConnection::new_connecting(self.secure.clone(), self.local_id, addr.peer_id(), connecting, self.main_tx.clone(), self.ctx.clone());
                             self.neighbours.insert(conn.conn_id(), conn);
                             Ok(())
                         }

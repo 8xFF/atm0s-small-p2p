@@ -18,7 +18,7 @@ use crate::{
     ConnectionId, PeerId,
 };
 
-use super::{msg::PeerMessage, InternalEvent};
+use super::{msg::PeerMessage, MainEvent};
 
 mod peer_alias;
 mod peer_internal;
@@ -36,7 +36,7 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
-    pub fn new_incoming<SECURE: HandshakeProtocol>(secure: Arc<SECURE>, local_id: PeerId, incoming: Incoming, internal_tx: Sender<InternalEvent>, ctx: SharedCtx) -> Self {
+    pub fn new_incoming<SECURE: HandshakeProtocol>(secure: Arc<SECURE>, local_id: PeerId, incoming: Incoming, main_tx: Sender<MainEvent>, ctx: SharedCtx) -> Self {
         let remote = incoming.remote_address();
         let conn_id = ConnectionId::rand();
 
@@ -47,21 +47,21 @@ impl PeerConnection {
                     log::info!("[PeerConnection {conn_id}] got connection from {remote}");
                     match connection.accept_bi().await {
                         Ok((send, recv)) => {
-                            if let Err(e) = run_connection(secure, ctx, remote, conn_id, local_id, PeerConnectionDirection::Incoming, &connection, send, recv, internal_tx).await {
+                            if let Err(e) = run_connection(secure, ctx, remote, conn_id, local_id, PeerConnectionDirection::Incoming, &connection, send, recv, main_tx).await {
                                 log::error!("[PeerConnection {conn_id}] connection from {remote} error {e}");
                                 let _ = tokio::time::timeout(Duration::from_secs(2), connection.closed()).await;
                             }
                         }
-                        Err(err) => internal_tx.send(InternalEvent::PeerConnectError(conn_id, None, err.into())).await.expect("should send to main"),
+                        Err(err) => main_tx.send(MainEvent::PeerConnectError(conn_id, None, err.into())).await.expect("should send to main"),
                     }
                 }
-                Err(err) => internal_tx.send(InternalEvent::PeerConnectError(conn_id, None, err.into())).await.expect("should send to main"),
+                Err(err) => main_tx.send(MainEvent::PeerConnectError(conn_id, None, err.into())).await.expect("should send to main"),
             }
         });
         Self { conn_id, peer_id: None }
     }
 
-    pub fn new_connecting<SECURE: HandshakeProtocol>(secure: Arc<SECURE>, local_id: PeerId, to_peer: PeerId, connecting: Connecting, internal_tx: Sender<InternalEvent>, ctx: SharedCtx) -> Self {
+    pub fn new_connecting<SECURE: HandshakeProtocol>(secure: Arc<SECURE>, local_id: PeerId, to_peer: PeerId, connecting: Connecting, main_tx: Sender<MainEvent>, ctx: SharedCtx) -> Self {
         let remote = connecting.remote_address();
         let conn_id = ConnectionId::rand();
 
@@ -71,20 +71,14 @@ impl PeerConnection {
                     log::info!("[PeerConnection {conn_id}] connected to {remote}");
                     match connection.open_bi().await {
                         Ok((send, recv)) => {
-                            if let Err(e) = run_connection(secure, ctx, remote, conn_id, local_id, PeerConnectionDirection::Outgoing(to_peer), &connection, send, recv, internal_tx).await {
+                            if let Err(e) = run_connection(secure, ctx, remote, conn_id, local_id, PeerConnectionDirection::Outgoing(to_peer), &connection, send, recv, main_tx).await {
                                 log::error!("[PeerConnection {conn_id}] connection to {remote} error {e}");
                             }
                         }
-                        Err(err) => internal_tx
-                            .send(InternalEvent::PeerConnectError(conn_id, Some(to_peer), err.into()))
-                            .await
-                            .expect("should send to main"),
+                        Err(err) => main_tx.send(MainEvent::PeerConnectError(conn_id, Some(to_peer), err.into())).await.expect("should send to main"),
                     }
                 }
-                Err(err) => internal_tx
-                    .send(InternalEvent::PeerConnectError(conn_id, Some(to_peer), err.into()))
-                    .await
-                    .expect("should send to main"),
+                Err(err) => main_tx.send(MainEvent::PeerConnectError(conn_id, Some(to_peer), err.into())).await.expect("should send to main"),
             }
         });
         Self { conn_id, peer_id: None }
@@ -135,7 +129,7 @@ async fn run_connection<SECURE: HandshakeProtocol>(
     connection: &Connection,
     mut send: SendStream,
     mut recv: RecvStream,
-    internal_tx: Sender<InternalEvent>,
+    main_tx: Sender<MainEvent>,
 ) -> anyhow::Result<()> {
     let to_id = if let PeerConnectionDirection::Outgoing(dest) = direction {
         let auth = secure.create_request(local_id, dest, now_ms());
@@ -177,15 +171,15 @@ async fn run_connection<SECURE: HandshakeProtocol>(
     let rtt_ms = connection.rtt().as_millis().min(u16::MAX as u128) as u16;
     let (control_tx, control_rx) = channel(10);
     let alias = PeerConnectionAlias::new(local_id, to_id, conn_id, control_tx);
-    let mut internal = PeerConnectionInternal::new(ctx.clone(), conn_id, to_id, connection.clone(), send, recv, internal_tx.clone(), control_rx);
+    let mut internal = PeerConnectionInternal::new(ctx.clone(), conn_id, to_id, connection.clone(), send, recv, main_tx.clone(), control_rx);
     log::info!("[PeerConnection {conn_id}] started {remote}, rtt: {rtt_ms}");
     ctx.register_conn(conn_id, alias);
-    internal_tx.send(InternalEvent::PeerConnected(conn_id, to_id, rtt_ms)).await.expect("should send to main");
+    main_tx.send(MainEvent::PeerConnected(conn_id, to_id, rtt_ms)).await.expect("should send to main");
     log::info!("[PeerConnection {conn_id}] run loop for {remote}");
     if let Err(e) = internal.run_loop().await {
         log::error!("[PeerConnection {conn_id}] {remote} error {e}");
     }
-    internal_tx.send(InternalEvent::PeerDisconnected(conn_id, to_id)).await.expect("should send to main");
+    main_tx.send(MainEvent::PeerDisconnected(conn_id, to_id)).await.expect("should send to main");
     log::info!("[PeerConnection {conn_id}] end loop for {remote}");
     ctx.unregister_conn(&conn_id);
     Ok(())
