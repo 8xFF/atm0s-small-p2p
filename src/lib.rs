@@ -263,6 +263,7 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
             }
             MainEvent::PeerConnectError(conn, peer, err) => {
                 log::error!("[P2pNetwork] connection {conn} outgoing: {peer:?} error {err}");
+                self.neighbours.remove(&conn);
                 Ok(P2pNetworkEvent::Continue)
             }
             MainEvent::PeerDisconnected(conn, peer) => {
