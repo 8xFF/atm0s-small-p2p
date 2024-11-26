@@ -13,7 +13,7 @@ use quinn::{Connection, RecvStream, SendStream};
 use tokio::{
     io::copy_bidirectional,
     select,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender},
     time::Interval,
 };
 use tokio_util::codec::Framed;
@@ -41,10 +41,6 @@ pub struct PeerConnectionInternal {
     main_tx: Sender<MainEvent>,
     control_rx: Receiver<PeerConnectionControl>,
     ticker: Interval,
-    /// We found some case where quinn open_bi stuck, so we need to close connection and let peer reconnect
-    /// Each time we need to open bi, we check timeout and notify by use error_tx sender
-    error_tx: Sender<anyhow::Error>,
-    error_rx: Receiver<anyhow::Error>,
 }
 
 impl PeerConnectionInternal {
@@ -60,7 +56,6 @@ impl PeerConnectionInternal {
         control_rx: Receiver<PeerConnectionControl>,
     ) -> Self {
         let stream = P2pQuicStream::new(main_recv, main_send);
-        let (error_tx, error_rx) = channel(10);
 
         Self {
             conn_id,
@@ -72,8 +67,6 @@ impl PeerConnectionInternal {
             main_tx,
             control_rx,
             ticker: tokio::time::interval(Duration::from_secs(1)),
-            error_tx,
-            error_rx,
         }
     }
 
@@ -96,13 +89,6 @@ impl PeerConnectionInternal {
                     let control = control.ok_or(anyhow!("peer control channel ended"))?;
                     self.on_control(control).await?;
                 },
-                error = self.error_rx.recv() => {
-                    // we found some internal error then we need to close connection and let peer reconnect
-                    // Example: quinn open_bi stuck
-                    let error = error.ok_or(anyhow!("peer error channel ended"))?;
-                    log::error!("[PeerConnectionInternal {}] error {error} => close connection", self.remote);
-                    return Err(error);
-                },
             }
         }
     }
@@ -120,10 +106,9 @@ impl PeerConnectionInternal {
             PeerConnectionControl::OpenStream(service, source, dest, meta, tx) => {
                 let remote = self.remote;
                 let connection = self.connection.clone();
-                let error_tx = self.error_tx.clone();
                 tokio::spawn(async move {
                     log::info!("[PeerConnectionInternal {remote}] open_bi for service {service}");
-                    let res = open_bi(connection, source, dest, service, meta, error_tx).await;
+                    let res = open_bi(connection, source, dest, service, meta).await;
                     if let Err(e) = &res {
                         log::error!("[PeerConnectionInternal {remote}] open_bi for service {service} error {e}");
                     } else {
@@ -185,12 +170,11 @@ impl PeerConnectionInternal {
     }
 }
 
-async fn open_bi(connection: Connection, source: PeerId, dest: PeerId, service: P2pServiceId, meta: Vec<u8>, error_tx: Sender<anyhow::Error>) -> anyhow::Result<P2pQuicStream> {
+async fn open_bi(connection: Connection, source: PeerId, dest: PeerId, service: P2pServiceId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
     let (send, recv) = if let Ok(Ok((send, recv))) = tokio::time::timeout(OPEN_BI_TIMEOUT, connection.open_bi()).await {
         (send, recv)
     } else {
-        error_tx.send(anyhow!("open bi error")).await.expect("should send to error");
-        return Err(anyhow!("open bi error"));
+        return Err(anyhow!("open bi timeout"));
     };
     let mut stream = P2pQuicStream::new(recv, send);
     write_object::<_, _, 500>(&mut stream, &StreamConnectReq { source, dest, service, meta }).await?;
