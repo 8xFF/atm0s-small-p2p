@@ -3,6 +3,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use crate::{ctx::SharedCtx, msg::P2pServiceId, router::SharedRouterTable, stream::P2pQuicStream, PeerId};
 
 pub mod alias_service;
+pub mod metrics_service;
 pub mod pubsub_service;
 pub mod visualization_service;
 

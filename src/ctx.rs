@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::{
     msg::{BroadcastMsgId, P2pServiceId, PeerMessage},
-    peer::PeerConnectionAlias,
+    peer::{PeerConnectionAlias, PeerConnectionMetric},
     router::{RouteAction, SharedRouterTable},
     service::P2pServiceEvent,
     stream::P2pQuicStream,
@@ -18,6 +18,7 @@ use crate::{
 #[derive(Debug)]
 struct SharedCtxInternal {
     conns: HashMap<ConnectionId, PeerConnectionAlias>,
+    conn_metrics: HashMap<ConnectionId, (PeerId, PeerConnectionMetric)>,
     received_broadcast_msg: LruCache<BroadcastMsgId, ()>,
     services: [Option<Sender<P2pServiceEvent>>; 256],
 }
@@ -38,6 +39,7 @@ impl SharedCtxInternal {
 
     fn unregister_conn(&mut self, conn: &ConnectionId) {
         self.conns.remove(conn);
+        self.conn_metrics.remove(conn);
     }
 
     fn conn(&self, conn: &ConnectionId) -> Option<PeerConnectionAlias> {
@@ -46,6 +48,19 @@ impl SharedCtxInternal {
 
     fn conns(&self) -> Vec<PeerConnectionAlias> {
         self.conns.values().cloned().collect::<Vec<_>>()
+    }
+
+    fn update_conn_metrics(&mut self, conn: &ConnectionId, peer: PeerId, metrics: PeerConnectionMetric) {
+        self.conn_metrics.insert(*conn, (peer, metrics));
+    }
+
+    fn metrics(&self) -> Vec<(ConnectionId, PeerId, PeerConnectionMetric)> {
+        let mut ret = vec![];
+        for (conn, (peer, metrics)) in self.conn_metrics.clone() {
+            ret.push((conn, peer, metrics));
+        }
+
+        ret
     }
 
     /// check if we already got the message
@@ -72,6 +87,7 @@ impl SharedCtx {
         Self {
             ctx: Arc::new(RwLock::new(SharedCtxInternal {
                 conns: Default::default(),
+                conn_metrics: Default::default(),
                 received_broadcast_msg: LruCache::new(8192.try_into().expect("should ok")),
                 services: std::array::from_fn(|_| None),
             })),
@@ -97,6 +113,14 @@ impl SharedCtx {
 
     pub fn conns(&self) -> Vec<PeerConnectionAlias> {
         self.ctx.read().conns()
+    }
+
+    pub fn update_metrics(&self, conn: &ConnectionId, peer: PeerId, metrics: PeerConnectionMetric) {
+        self.ctx.write().update_conn_metrics(conn, peer, metrics);
+    }
+
+    pub fn metrics(&self) -> Vec<(ConnectionId, PeerId, PeerConnectionMetric)> {
+        self.ctx.read().metrics()
     }
 
     pub fn router(&self) -> &SharedRouterTable {

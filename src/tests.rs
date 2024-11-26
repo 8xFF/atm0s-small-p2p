@@ -7,6 +7,7 @@ use crate::{P2pNetwork, P2pNetworkConfig, PeerAddress, PeerId, SharedKeyHandshak
 mod alias;
 mod cross_nodes;
 mod discovery;
+mod metrics;
 mod pubsub;
 mod visualization;
 

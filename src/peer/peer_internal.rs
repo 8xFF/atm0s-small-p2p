@@ -5,11 +5,15 @@
 //! - Only use async with current connection stream
 //! - For other communication should use try_send for avoiding blocking
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 use anyhow::anyhow;
 use futures::{SinkExt, StreamExt};
 use quinn::{Connection, RecvStream, SendStream};
+use serde::{Deserialize, Serialize};
 use tokio::{
     io::copy_bidirectional,
     select,
@@ -31,6 +35,18 @@ use super::PeerConnectionControl;
 
 const OPEN_BI_TIMEOUT: Duration = Duration::from_secs(2);
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PeerConnectionMetric {
+    pub uptime: u64,
+    pub rtt: u16,
+    pub sent_pkt: u64,
+    pub lost_pkt: u64,
+    pub lost_bytes: u64,
+    pub send_bytes: u64,
+    pub recv_bytes: u64,
+    pub current_mtu: u16,
+}
+
 pub struct PeerConnectionInternal {
     conn_id: ConnectionId,
     to_id: PeerId,
@@ -41,6 +57,7 @@ pub struct PeerConnectionInternal {
     main_tx: Sender<MainEvent>,
     control_rx: Receiver<PeerConnectionControl>,
     ticker: Interval,
+    started: Instant,
 }
 
 impl PeerConnectionInternal {
@@ -67,6 +84,7 @@ impl PeerConnectionInternal {
             main_tx,
             control_rx,
             ticker: tokio::time::interval(Duration::from_secs(1)),
+            started: Instant::now(),
         }
     }
 
@@ -75,7 +93,19 @@ impl PeerConnectionInternal {
             select! {
                 _ = self.ticker.tick() => {
                     let rtt_ms = self.connection.rtt().as_millis().min(u16::MAX as u128) as u16;
+                    let connection_stats = self.connection.stats();
                     self.ctx.router().set_direct(self.conn_id, self.to_id, rtt_ms);
+                    let metrics = PeerConnectionMetric {
+                        uptime: self.started.elapsed().as_secs(),
+                        sent_pkt: connection_stats.path.sent_packets,
+                        lost_pkt: connection_stats.path.lost_packets,
+                        lost_bytes: connection_stats.path.lost_bytes,
+                        rtt: rtt_ms,
+                        send_bytes: connection_stats.udp_tx.bytes,
+                        recv_bytes: connection_stats.udp_rx.bytes,
+                        current_mtu: connection_stats.path.current_mtu,
+                    };
+                    let _ = self.main_tx.try_send(MainEvent::PeerStats(self.conn_id, self.to_id, metrics));
                 },
                 open = self.connection.accept_bi() => {
                     let (send, recv) = open?;
@@ -88,7 +118,7 @@ impl PeerConnectionInternal {
                 control = self.control_rx.recv() => {
                     let control = control.ok_or(anyhow!("peer control channel ended"))?;
                     self.on_control(control).await?;
-                },
+                }
             }
         }
     }
