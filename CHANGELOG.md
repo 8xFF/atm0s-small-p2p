@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/8xFF/atm0s-small-p2p/compare/v0.2.0...v0.2.1) - 2024-11-26
+
+### Added
+
+- export quinn connection metrics ([#23](https://github.com/8xFF/atm0s-small-p2p/pull/23))
+
+### Fixed
+
+- temporary fix quinn open_bi stuck by add timeout ([#20](https://github.com/8xFF/atm0s-small-p2p/pull/20))
+- dup outgoing conn ([#21](https://github.com/8xFF/atm0s-small-p2p/pull/21))
+
 ## [0.2.0](https://github.com/8xFF/atm0s-small-p2p/compare/v0.1.0...v0.2.0) - 2024-11-08
 
 ### Added
