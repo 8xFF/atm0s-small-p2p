@@ -201,11 +201,7 @@ impl PeerConnectionInternal {
 }
 
 async fn open_bi(connection: Connection, source: PeerId, dest: PeerId, service: P2pServiceId, meta: Vec<u8>) -> anyhow::Result<P2pQuicStream> {
-    let (send, recv) = if let Ok(Ok((send, recv))) = tokio::time::timeout(OPEN_BI_TIMEOUT, connection.open_bi()).await {
-        (send, recv)
-    } else {
-        return Err(anyhow!("open bi timeout"));
-    };
+    let (send, recv) = tokio::time::timeout(OPEN_BI_TIMEOUT, connection.open_bi()).await??;
     let mut stream = P2pQuicStream::new(recv, send);
     write_object::<_, _, 500>(&mut stream, &StreamConnectReq { source, dest, service, meta }).await?;
     let res = wait_object::<_, StreamConnectRes, 500>(&mut stream).await?;
