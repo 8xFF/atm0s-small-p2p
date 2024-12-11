@@ -5,6 +5,7 @@ use crate::{ctx::SharedCtx, msg::P2pServiceId, router::SharedRouterTable, stream
 pub mod alias_service;
 pub mod metrics_service;
 pub mod pubsub_service;
+pub mod replicate_kv_service;
 pub mod visualization_service;
 
 const SERVICE_CHANNEL_SIZE: usize = 10;
