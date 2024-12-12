@@ -65,7 +65,7 @@ where
                 self.outs.push_back(NetEvent::Unicast(from_node, RpcEvent::RpcRes(res)));
             }
             RpcReq::FetchSnapshot => {
-                let snapshot = self.snaphsot();
+                let snapshot = self.snapshot();
                 let res = RpcRes::FetchSnapshot {
                     slots: snapshot,
                     version: self.version,
@@ -75,16 +75,12 @@ where
         }
     }
 
-    pub fn changeds_from_to(&self, from: Version, to: Option<Version>) -> Vec<Changed<V>> {
+    fn changeds_from_to(&self, from: Version, to: Option<Version>) -> Vec<Changed<V>> {
         self.changeds.range(from..=to.unwrap_or(self.version)).map(|(_, v)| v.clone()).collect()
     }
 
-    pub fn snaphsot(&self) -> Vec<(Key, Slot<V>)> {
+    fn snapshot(&self) -> Vec<(Key, Slot<V>)> {
         self.slots.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>()
-    }
-
-    pub fn version(&self) -> Version {
-        self.version
     }
 
     pub fn pop_out(&mut self) -> Option<NetEvent<N, V>> {

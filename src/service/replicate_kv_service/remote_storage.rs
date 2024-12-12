@@ -8,7 +8,7 @@ use std::{
 use super::{Action, BroadcastEvent, Changed, Key, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, Version};
 
 #[derive(Debug)]
-pub enum RemoteStoreState<N, V> {
+enum RemoteStoreState<N, V> {
     SyncFull(SyncFullState<N, V>),
     SyncPart(SyncPartState<N, V>),
     Working(WorkingState<N, V>),
@@ -167,7 +167,7 @@ impl<N, V> SyncPartState<N, V> {
 }
 
 impl<N, V> SyncPartState<N, V> {
-    /// we check if pendings list is continuos and start with from_version and end with remain is false
+    /// we check if pendings list is continuous and start with from_version and end with remain is false
     fn is_finished(&self) -> bool {
         if self.pendings.is_empty() {
             return false;
