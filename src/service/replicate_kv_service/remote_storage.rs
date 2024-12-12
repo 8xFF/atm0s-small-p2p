@@ -2,9 +2,10 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     fmt::Debug,
     marker::PhantomData,
+    time::Instant,
 };
 
-use super::{Action, BroadcastEvent, Changed, Key, NetEvent, RpcReq, RpcRes, Slot, Version};
+use super::{Action, BroadcastEvent, Changed, Key, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, Version};
 
 #[derive(Debug)]
 pub enum RemoteStoreState<N, V> {
@@ -58,6 +59,7 @@ trait State<N, V> {
 pub struct RemoteStore<N, V> {
     ctx: StateCtx<N, V>,
     state: RemoteStoreState<N, V>,
+    last_active: Instant,
 }
 
 impl<N, V> RemoteStore<N, V>
@@ -79,10 +81,16 @@ where
         Self {
             ctx,
             state: RemoteStoreState::SyncFull(state),
+            last_active: Instant::now(),
         }
     }
 
+    pub fn last_active(&self) -> Instant {
+        self.last_active
+    }
+
     pub fn on_broadcast(&mut self, event: BroadcastEvent<V>) {
+        self.last_active = Instant::now();
         self.state.on_broadcast(&mut self.ctx, event);
         if let Some(mut next_state) = self.ctx.next_state.take() {
             next_state.init(&mut self.ctx);
@@ -91,6 +99,7 @@ where
     }
 
     pub fn on_rpc_res(&mut self, event: RpcRes<V>) {
+        self.last_active = Instant::now();
         self.state.on_rpc_res(&mut self.ctx, event);
         if let Some(mut next_state) = self.ctx.next_state.take() {
             next_state.init(&mut self.ctx);
@@ -120,7 +129,7 @@ where
 {
     fn init(&mut self, ctx: &mut StateCtx<N, V>) {
         ctx.slots.clear();
-        ctx.outs.push_back(NetEvent::RpcReq(ctx.remote.clone(), RpcReq::FetchSnapshot));
+        ctx.outs.push_back(NetEvent::Unicast(ctx.remote.clone(), RpcEvent::RpcReq(RpcReq::FetchSnapshot)));
     }
 
     fn on_broadcast(&mut self, _ctx: &mut StateCtx<N, V>, _event: BroadcastEvent<V>) {
@@ -183,7 +192,8 @@ where
     N: Clone,
 {
     fn init(&mut self, ctx: &mut StateCtx<N, V>) {
-        ctx.outs.push_back(NetEvent::RpcReq(ctx.remote.clone(), RpcReq::FetchChanged { from: self.from_version, to: None }));
+        ctx.outs
+            .push_back(NetEvent::Unicast(ctx.remote.clone(), RpcEvent::RpcReq(RpcReq::FetchChanged { from: self.from_version, to: None })));
     }
 
     fn on_broadcast(&mut self, _ctx: &mut StateCtx<N, V>, _event: BroadcastEvent<V>) {

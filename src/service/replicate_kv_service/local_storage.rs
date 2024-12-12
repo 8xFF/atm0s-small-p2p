@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
-use super::{Action, BroadcastEvent, Changed, Key, NetEvent, RpcReq, RpcRes, Slot, Version};
+use super::{Action, BroadcastEvent, Changed, Key, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, Version};
 
 pub struct LocalStore<N, V> {
     slots: HashMap<Key, Slot<V>>,
@@ -62,7 +62,7 @@ where
                 let changeds = self.changeds_from_to(from, to);
                 // TODO split to small parts for avoid too much data
                 let res = RpcRes::FetchChanged { changes: changeds, remain: false };
-                self.outs.push_back(NetEvent::RpcRes(from_node, res));
+                self.outs.push_back(NetEvent::Unicast(from_node, RpcEvent::RpcRes(res)));
             }
             RpcReq::FetchSnapshot => {
                 let snapshot = self.snaphsot();
@@ -70,7 +70,7 @@ where
                     slots: snapshot,
                     version: self.version,
                 };
-                self.outs.push_back(NetEvent::RpcRes(from_node, res));
+                self.outs.push_back(NetEvent::Unicast(from_node, RpcEvent::RpcRes(res)));
             }
         }
     }
