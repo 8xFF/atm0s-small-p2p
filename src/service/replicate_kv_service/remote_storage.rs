@@ -422,6 +422,17 @@ mod tests {
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 2))));
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 1))));
         assert_eq!(ctx.outs.pop_front(), None);
+
+        // after received FetchChanged, it should be rejected
+        state.on_rpc_res(
+            &mut ctx,
+            RpcRes::FetchChanged(Ok(vec![Changed {
+                key: 1,
+                version: Version(1),
+                action: Action::Set(2),
+            }])),
+        );
+        assert_eq!(ctx.outs.pop_front(), None);
     }
 
     /// After missing changed we got FetchChanged response
