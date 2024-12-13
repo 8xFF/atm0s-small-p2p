@@ -144,7 +144,7 @@ pub struct ReplicatedKvStore<N, K, V> {
 
 impl<N, K, V> ReplicatedKvStore<N, K, V>
 where
-    N: Eq + Hash + Clone,
+    N: Debug + Eq + Hash + Clone,
     K: Debug + Hash + Ord + Eq + Clone,
     V: Debug + Eq + Clone,
 {
@@ -161,9 +161,10 @@ where
         while let Some(event) = self.local.pop_out() {
             self.outs.push_back(event);
         }
-        self.remotes.retain(|_, remote| {
+        self.remotes.retain(|node, remote| {
             let keep = remote.last_active().elapsed().as_millis() < REMOTE_TIMEOUT_MS;
             if !keep {
+                log::info!("[ReplicatedKvService] remove remote {node:?} after timeout");
                 remote.destroy();
                 while let Some(event) = remote.pop_out() {
                     self.outs.push_back(event);
@@ -189,6 +190,7 @@ where
 
     pub fn on_remote_event(&mut self, from: N, event: NetEvent<N, K, V>) {
         if !self.remotes.contains_key(&from) {
+            log::info!("[ReplicatedKvService] add remote {from:?}");
             let mut remote = RemoteStore::new(from.clone());
             while let Some(event) = remote.pop_out() {
                 self.outs.push_back(event);

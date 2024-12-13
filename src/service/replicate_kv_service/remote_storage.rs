@@ -18,8 +18,8 @@ enum RemoteStoreState<N, K, V> {
 impl<N, K, V> State<N, K, V> for RemoteStoreState<N, K, V>
 where
     K: Debug + Hash + Ord + Eq + Clone,
-    V: Clone,
-    N: Clone,
+    V: Debug + Clone,
+    N: Debug + Clone,
 {
     fn init(&mut self, ctx: &mut StateCtx<N, K, V>) {
         match self {
@@ -67,7 +67,7 @@ pub struct RemoteStore<N, K, V> {
 
 impl<N, K, V> RemoteStore<N, K, V>
 where
-    N: Clone,
+    N: Debug + Clone,
     K: Debug + Hash + Ord + Eq + Clone,
     V: Debug + Eq + Clone,
 {
@@ -136,10 +136,11 @@ impl<N, K, V> Default for SyncFullState<N, K, V> {
 impl<N, K, V> State<N, K, V> for SyncFullState<N, K, V>
 where
     K: Debug + Hash + Ord + Eq + Clone,
-    V: Clone,
-    N: Clone,
+    V: Debug + Clone,
+    N: Debug + Clone,
 {
     fn init(&mut self, ctx: &mut StateCtx<N, K, V>) {
+        log::info!("[RemoteStore {:?}] switch to syncFull", ctx.remote);
         while let Some((k, _v)) = ctx.slots.pop_first() {
             ctx.outs.push_back(Event::KvEvent(KvEvent::Del(Some(ctx.remote.clone()), k)));
         }
@@ -156,6 +157,7 @@ where
                 // dont process here
             }
             RpcRes::FetchSnapshot { slots, version } => {
+                log::info!("[RemoteStore {:?}] switch to working with {} slots and version {version:?}", ctx.remote, slots.len());
                 for (k, slot) in slots.iter() {
                     ctx.outs.push_back(Event::KvEvent(KvEvent::Set(Some(ctx.remote.clone()), k.clone(), slot.value.clone())));
                 }
@@ -177,8 +179,8 @@ struct WorkingState<N, K, V> {
 impl<N, K, V> WorkingState<N, K, V>
 where
     K: Debug + Hash + Ord + Eq + Clone,
-    V: Clone,
-    N: Clone,
+    V: Debug + Clone,
+    N: Debug + Clone,
 {
     fn new(version: Version) -> Self {
         Self {
@@ -195,22 +197,22 @@ where
                 let (_, data) = self.pendings.pop_first().expect("should have data");
                 match data.action {
                     Action::Set(value) => {
+                        log::debug!("[RemoteStore {:?}] apply set k {:?} => version {:?}", ctx.remote, data.key, data.version);
                         ctx.outs.push_back(Event::KvEvent(KvEvent::Set(Some(ctx.remote.clone()), data.key.clone(), value.clone())));
                         ctx.slots.insert(data.key, Slot { version: data.version, value });
                     }
                     Action::Del => {
+                        log::debug!("[RemoteStore {:?}] apply del k {:?} => version {:?}", ctx.remote, data.key, data.version);
                         ctx.outs.push_back(Event::KvEvent(KvEvent::Del(Some(ctx.remote.clone()), data.key.clone())));
                         ctx.slots.remove(&data.key);
                     }
                 }
             } else {
-                ctx.outs.push_back(Event::NetEvent(NetEvent::Unicast(
-                    ctx.remote.clone(),
-                    RpcEvent::RpcReq(RpcReq::FetchChanged {
-                        from: self.version + 1,
-                        count: *entry.key() - self.version - 1,
-                    }),
-                )));
+                let from = self.version + 1;
+                let count = *entry.key() - self.version - 1;
+                log::warn!("[RemoteStore {:?}] apply pendings discontinuity => request fetch changed from {from:?} count {count}", ctx.remote);
+                ctx.outs
+                    .push_back(Event::NetEvent(NetEvent::Unicast(ctx.remote.clone(), RpcEvent::RpcReq(RpcReq::FetchChanged { from, count }))));
                 break;
             }
         }
@@ -220,11 +222,12 @@ where
 impl<N, K, V> State<N, K, V> for WorkingState<N, K, V>
 where
     K: Debug + Hash + Ord + Eq + Clone,
-    V: Clone,
-    N: Clone,
+    V: Debug + Clone,
+    N: Debug + Clone,
 {
-    fn init(&mut self, _ctx: &mut StateCtx<N, K, V>) {
+    fn init(&mut self, ctx: &mut StateCtx<N, K, V>) {
         // dont need init in working state
+        log::info!("[RemoteStore {:?}] switch to working", ctx.remote);
     }
 
     fn on_broadcast(&mut self, ctx: &mut StateCtx<N, K, V>, event: BroadcastEvent<K, V>) {
@@ -238,13 +241,11 @@ where
             BroadcastEvent::Version(version) => {
                 if version > self.version && self.pendings.is_empty() {
                     // resync part
-                    ctx.outs.push_back(Event::NetEvent(NetEvent::Unicast(
-                        ctx.remote.clone(),
-                        RpcEvent::RpcReq(RpcReq::FetchChanged {
-                            from: self.version + 1,
-                            count: version - self.version,
-                        }),
-                    )));
+                    let from = self.version + 1;
+                    let count = version - self.version;
+                    log::warn!("[RemoteStore {:?}] received discontinuity version => request fetch changed from {from:?} count {count}", ctx.remote);
+                    ctx.outs
+                        .push_back(Event::NetEvent(NetEvent::Unicast(ctx.remote.clone(), RpcEvent::RpcReq(RpcReq::FetchChanged { from, count }))));
                 }
             }
         }
@@ -253,6 +254,7 @@ where
     fn on_rpc_res(&mut self, ctx: &mut StateCtx<N, K, V>, event: RpcRes<K, V>) {
         match event {
             RpcRes::FetchChanged(Ok(changeds)) => {
+                log::info!("[RemoteStore {:?}] fetch changed success with {} changeds => apply", ctx.remote, changeds.len());
                 for changed in changeds {
                     if changed.version > self.version {
                         self.pendings.insert(changed.version, changed);
