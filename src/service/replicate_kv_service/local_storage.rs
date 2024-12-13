@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     hash::Hash,
 };
 
@@ -8,7 +8,7 @@ use super::{Action, BroadcastEvent, Changed, Event, FetchChangedError, KvEvent, 
 const MAX_CHANGE_SINGLE_PKT: u64 = 1024;
 
 pub struct LocalStore<N, K, V> {
-    slots: HashMap<K, Slot<V>>,
+    slots: BTreeMap<K, Slot<V>>,
     changeds: BTreeMap<Version, Changed<K, V>>,
     max_changeds: usize,
     version: Version,
@@ -22,7 +22,7 @@ where
 {
     pub fn new(max_changeds: usize) -> Self {
         LocalStore {
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             changeds: BTreeMap::new(),
             max_changeds,
             version: Version(0),

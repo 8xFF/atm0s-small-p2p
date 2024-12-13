@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     fmt::Debug,
     hash::Hash,
     marker::PhantomData,
@@ -12,6 +12,7 @@ use super::{Action, BroadcastEvent, Changed, Event, KvEvent, NetEvent, RpcEvent,
 enum RemoteStoreState<N, K, V> {
     SyncFull(SyncFullState<N, K, V>),
     Working(WorkingState<N, K, V>),
+    Destroy(DestroyState<N, K, V>),
 }
 
 impl<N, K, V> State<N, K, V> for RemoteStoreState<N, K, V>
@@ -24,6 +25,7 @@ where
         match self {
             RemoteStoreState::SyncFull(state) => state.init(ctx),
             RemoteStoreState::Working(state) => state.init(ctx),
+            RemoteStoreState::Destroy(state) => state.init(ctx),
         }
     }
 
@@ -31,6 +33,7 @@ where
         match self {
             RemoteStoreState::SyncFull(state) => state.on_broadcast(ctx, event),
             RemoteStoreState::Working(state) => state.on_broadcast(ctx, event),
+            RemoteStoreState::Destroy(state) => state.on_broadcast(ctx, event),
         }
     }
 
@@ -38,13 +41,14 @@ where
         match self {
             RemoteStoreState::SyncFull(state) => state.on_rpc_res(ctx, event),
             RemoteStoreState::Working(state) => state.on_rpc_res(ctx, event),
+            RemoteStoreState::Destroy(state) => state.on_rpc_res(ctx, event),
         }
     }
 }
 
 struct StateCtx<N, K, V> {
     remote: N,
-    slots: HashMap<K, Slot<V>>,
+    slots: BTreeMap<K, Slot<V>>,
     outs: VecDeque<Event<N, K, V>>,
     next_state: Option<RemoteStoreState<N, K, V>>,
 }
@@ -70,7 +74,7 @@ where
     pub fn new(remote: N) -> Self {
         let mut ctx = StateCtx {
             remote,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             outs: VecDeque::new(),
             next_state: None,
         };
@@ -83,6 +87,12 @@ where
             state: RemoteStoreState::SyncFull(state),
             last_active: Instant::now(),
         }
+    }
+
+    pub fn destroy(&mut self) {
+        let mut state = DestroyState { _tmp: PhantomData };
+        state.init(&mut self.ctx);
+        self.state = RemoteStoreState::Destroy(state);
     }
 
     pub fn last_active(&self) -> Instant {
@@ -130,7 +140,9 @@ where
     N: Clone,
 {
     fn init(&mut self, ctx: &mut StateCtx<N, K, V>) {
-        ctx.slots.clear();
+        while let Some((k, _v)) = ctx.slots.pop_first() {
+            ctx.outs.push_back(Event::KvEvent(KvEvent::Del(Some(ctx.remote.clone()), k)));
+        }
         ctx.outs.push_back(Event::NetEvent(NetEvent::Unicast(ctx.remote.clone(), RpcEvent::RpcReq(RpcReq::FetchSnapshot))));
     }
 
@@ -218,11 +230,7 @@ where
     fn on_broadcast(&mut self, ctx: &mut StateCtx<N, K, V>, event: BroadcastEvent<K, V>) {
         match event {
             BroadcastEvent::Changed(changed) => {
-                if self.version > changed.version {
-                    // wrong data => resyncFull
-                    ctx.slots.clear();
-                    ctx.next_state = Some(RemoteStoreState::SyncFull(SyncFullState::default()));
-                } else if self.version < changed.version {
+                if self.version < changed.version {
                     self.pendings.insert(changed.version, changed);
                     self.apply_pendings(ctx);
                 }
@@ -263,6 +271,32 @@ where
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct DestroyState<N, K, V> {
+    _tmp: PhantomData<(N, K, V)>,
+}
+
+impl<N, K, V> State<N, K, V> for DestroyState<N, K, V>
+where
+    K: Debug + Hash + Ord + Eq + Clone,
+    V: Clone,
+    N: Clone,
+{
+    fn init(&mut self, ctx: &mut StateCtx<N, K, V>) {
+        while let Some((k, _v)) = ctx.slots.pop_first() {
+            ctx.outs.push_back(Event::KvEvent(KvEvent::Del(Some(ctx.remote.clone()), k)));
+        }
+    }
+
+    fn on_broadcast(&mut self, _ctx: &mut StateCtx<N, K, V>, _event: BroadcastEvent<K, V>) {
+        // dont process here
+    }
+
+    fn on_rpc_res(&mut self, _ctx: &mut StateCtx<N, K, V>, _event: RpcRes<K, V>) {
+        // dont process here
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,7 +306,7 @@ mod tests {
     fn test_restore_full() {
         let mut ctx: StateCtx<u16, u16, u16> = StateCtx {
             remote: 1,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             outs: VecDeque::new(),
             next_state: None,
         };
@@ -287,7 +321,7 @@ mod tests {
             },
         );
 
-        assert_eq!(ctx.slots, HashMap::from([(1, Slot::new(1, Version(1)))]));
+        assert_eq!(ctx.slots, BTreeMap::from([(1, Slot::new(1, Version(1)))]));
         assert_eq!(ctx.next_state, Some(RemoteStoreState::Working(WorkingState::new(Version(1)))));
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 1))));
         assert_eq!(ctx.outs.pop_front(), None);
@@ -298,7 +332,7 @@ mod tests {
     fn test_working_state_zero() {
         let mut ctx: StateCtx<u16, u16, u16> = StateCtx {
             remote: 1,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             outs: VecDeque::new(),
             next_state: None,
         };
@@ -314,7 +348,7 @@ mod tests {
             }),
         );
 
-        assert_eq!(ctx.slots, HashMap::from([(1, Slot::new(1, Version(1)))]));
+        assert_eq!(ctx.slots, BTreeMap::from([(1, Slot::new(1, Version(1)))]));
         assert_eq!(ctx.next_state, None);
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 1))));
         assert_eq!(ctx.outs.pop_front(), None);
@@ -325,7 +359,7 @@ mod tests {
     fn test_working_state_zero_out_of_sync() {
         let mut ctx: StateCtx<u16, u16, u16> = StateCtx {
             remote: 1,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             outs: VecDeque::new(),
             next_state: None,
         };
@@ -334,7 +368,7 @@ mod tests {
 
         state.on_broadcast(&mut ctx, BroadcastEvent::Version(Version(1)));
 
-        assert_eq!(ctx.slots, HashMap::new());
+        assert_eq!(ctx.slots, BTreeMap::new());
         assert_eq!(ctx.next_state, None);
         assert_eq!(
             ctx.outs.pop_front(),
@@ -348,7 +382,7 @@ mod tests {
     fn test_working_state_missing_changed() {
         let mut ctx: StateCtx<u16, u16, u16> = StateCtx {
             remote: 1,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             outs: VecDeque::new(),
             next_state: None,
         };
@@ -365,7 +399,7 @@ mod tests {
         );
 
         assert_eq!(state.pendings.len(), 1);
-        assert_eq!(ctx.slots, HashMap::new());
+        assert_eq!(ctx.slots, BTreeMap::new());
         assert_eq!(ctx.next_state, None);
         assert_eq!(
             ctx.outs.pop_front(),
@@ -383,7 +417,7 @@ mod tests {
         );
 
         assert_eq!(state.pendings.len(), 0);
-        assert_eq!(ctx.slots, HashMap::from([(1, Slot::new(1, Version(2)))]));
+        assert_eq!(ctx.slots, BTreeMap::from([(1, Slot::new(1, Version(2)))]));
         assert_eq!(ctx.next_state, None);
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 2))));
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 1))));
@@ -395,7 +429,7 @@ mod tests {
     fn test_working_state_missing_changed2() {
         let mut ctx: StateCtx<u16, u16, u16> = StateCtx {
             remote: 1,
-            slots: HashMap::new(),
+            slots: BTreeMap::new(),
             outs: VecDeque::new(),
             next_state: None,
         };
@@ -412,7 +446,7 @@ mod tests {
         );
 
         assert_eq!(state.pendings.len(), 1);
-        assert_eq!(ctx.slots, HashMap::new());
+        assert_eq!(ctx.slots, BTreeMap::new());
         assert_eq!(ctx.next_state, None);
         assert_eq!(
             ctx.outs.pop_front(),
@@ -430,10 +464,28 @@ mod tests {
         );
 
         assert_eq!(state.pendings.len(), 0);
-        assert_eq!(ctx.slots, HashMap::from([(1, Slot::new(1, Version(2)))]));
+        assert_eq!(ctx.slots, BTreeMap::from([(1, Slot::new(1, Version(2)))]));
         assert_eq!(ctx.next_state, None);
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 2))));
         assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Set(Some(1), 1, 1))));
+        assert_eq!(ctx.outs.pop_front(), None);
+    }
+
+    #[test]
+    fn destroy_remote_should_clear_slots() {
+        let mut ctx: StateCtx<u16, u16, u16> = StateCtx {
+            remote: 1,
+            slots: BTreeMap::from([(1, Slot::new(1, Version(1)))]),
+            outs: VecDeque::new(),
+            next_state: None,
+        };
+
+        let mut state = DestroyState { _tmp: PhantomData };
+        state.init(&mut ctx);
+
+        assert_eq!(ctx.slots, BTreeMap::new());
+        assert_eq!(ctx.next_state, None);
+        assert_eq!(ctx.outs.pop_front(), Some(Event::KvEvent(KvEvent::Del(Some(1), 1))));
         assert_eq!(ctx.outs.pop_front(), None);
     }
 }

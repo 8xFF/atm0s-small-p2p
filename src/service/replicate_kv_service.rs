@@ -161,7 +161,16 @@ where
         while let Some(event) = self.local.pop_out() {
             self.outs.push_back(event);
         }
-        self.remotes.retain(|_, remote| remote.last_active().elapsed().as_millis() < REMOTE_TIMEOUT_MS);
+        self.remotes.retain(|_, remote| {
+            let keep = remote.last_active().elapsed().as_millis() < REMOTE_TIMEOUT_MS;
+            if !keep {
+                remote.destroy();
+                while let Some(event) = remote.pop_out() {
+                    self.outs.push_back(event);
+                }
+            }
+            keep
+        });
     }
 
     pub fn set(&mut self, key: K, value: V) {
@@ -237,6 +246,14 @@ where
             tick: tokio::time::interval(std::time::Duration::from_millis(1000)),
             store: ReplicatedKvStore::new(),
         }
+    }
+
+    pub fn set(&mut self, key: K, value: V) {
+        self.store.set(key, value);
+    }
+
+    pub fn del(&mut self, key: K) {
+        self.store.del(key);
     }
 
     pub async fn recv(&mut self) -> Option<KvEvent<PeerId, K, V>> {

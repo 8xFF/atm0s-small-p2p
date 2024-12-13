@@ -9,6 +9,7 @@ mod cross_nodes;
 mod discovery;
 mod metrics;
 mod pubsub;
+mod replicate_kv;
 mod visualization;
 
 pub const DEFAULT_CLUSTER_CERT: &[u8] = include_bytes!("../certs/dev.cluster.cert");
