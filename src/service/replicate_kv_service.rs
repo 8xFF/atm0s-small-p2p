@@ -96,9 +96,9 @@ pub enum BroadcastEvent<K, V> {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RpcReq {
+pub enum RpcReq<K> {
     FetchChanged { from: Version, count: u64 },
-    FetchSnapshot,
+    FetchSnapshot { from: Option<K>, to: Option<K>, max_version: Option<Version> },
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,14 +107,21 @@ pub enum FetchChangedError {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapsnotData<K, V> {
+    slots: Vec<(K, Slot<V>)>,
+    next_key: Option<K>,
+    bigest_key: K,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RpcRes<K, V> {
     FetchChanged(Result<Vec<Changed<K, V>>, FetchChangedError>),
-    FetchSnapshot { slots: Vec<(K, Slot<V>)>, version: Version },
+    FetchSnapshot(Option<SnapsnotData<K, V>>, Version),
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RpcEvent<K, V> {
-    RpcReq(RpcReq),
+    RpcReq(RpcReq<K>),
     RpcRes(RpcRes<K, V>),
 }
 
@@ -148,10 +155,10 @@ where
     K: Debug + Hash + Ord + Eq + Clone,
     V: Debug + Eq + Clone,
 {
-    pub fn new() -> Self {
+    pub fn new(max_changeds: usize, max_compose_pkts: usize) -> Self {
         ReplicatedKvStore {
             remotes: HashMap::new(),
-            local: LocalStore::new(1024),
+            local: LocalStore::new(max_changeds, max_compose_pkts),
             outs: VecDeque::new(),
         }
     }
@@ -242,11 +249,11 @@ where
     K: Debug + Hash + Ord + Eq + Clone + DeserializeOwned + Serialize,
     V: Debug + Eq + Clone + DeserializeOwned + Serialize,
 {
-    pub fn new(service: P2pService) -> Self {
+    pub fn new(service: P2pService, max_changeds: usize, max_compose_pkts: usize) -> Self {
         Self {
             service,
             tick: tokio::time::interval(std::time::Duration::from_millis(1000)),
-            store: ReplicatedKvStore::new(),
+            store: ReplicatedKvStore::new(max_changeds, max_compose_pkts),
         }
     }
 

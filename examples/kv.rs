@@ -125,7 +125,7 @@ async fn main() {
     .await
     .expect("should create network");
 
-    let mut kv_service: ReplicatedKvService<u64, u64> = ReplicatedKvService::new(p2p.create_service(0.into()));
+    let mut kv_service: ReplicatedKvService<u64, u64> = ReplicatedKvService::new(p2p.create_service(0.into()), 65000, 16000);
 
     let (control_tx, mut control_rx) = mpsc::channel::<Control>(10);
     tokio::spawn(async move {
