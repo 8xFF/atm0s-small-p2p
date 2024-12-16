@@ -89,37 +89,37 @@ impl Deref for Version {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum BroadcastEvent<K, V> {
     Changed(Changed<K, V>),
     Version(Version),
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum RpcReq<K> {
     FetchChanged { from: Version, count: u64 },
     FetchSnapshot { from: Option<K>, to: Option<K>, max_version: Option<Version> },
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum FetchChangedError {
     MissingData,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct SnapsnotData<K, V> {
     slots: Vec<(K, Slot<V>)>,
     next_key: Option<K>,
     bigest_key: K,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum RpcRes<K, V> {
     FetchChanged(Result<Vec<Changed<K, V>>, FetchChangedError>),
     FetchSnapshot(Option<SnapsnotData<K, V>>, Version),
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum RpcEvent<K, V> {
     RpcReq(RpcReq<K>),
     RpcRes(RpcRes<K, V>),
@@ -131,7 +131,7 @@ pub enum KvEvent<N, K, V> {
     Del(Option<N>, K),
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum NetEvent<N, K, V> {
     Broadcast(BroadcastEvent<K, V>),
     Unicast(N, RpcEvent<K, V>),
@@ -173,9 +173,11 @@ where
             if !keep {
                 log::info!("[ReplicatedKvService] remove remote {node:?} after timeout");
                 remote.destroy();
-                while let Some(event) = remote.pop_out() {
-                    self.outs.push_back(event);
-                }
+            } else {
+                remote.on_tick();
+            }
+            while let Some(event) = remote.pop_out() {
+                self.outs.push_back(event);
             }
             keep
         });
