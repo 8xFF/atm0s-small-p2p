@@ -128,6 +128,14 @@ impl RouterTable {
                 }
             }
         }
+
+        // we also need to remove relayed path which go over this connection
+        for (peer, memory) in self.peers.iter_mut() {
+            if memory.paths.remove(conn).is_some() {
+                Self::select_best_for(peer, memory);
+            }
+        }
+        self.peers.retain(|_k, v| v.best().is_some());
     }
 
     fn action(&self, dest: &PeerId) -> Option<RouteAction> {
@@ -330,5 +338,26 @@ mod tests {
 
         // we shouldn't create sync with peer2 because it over MAX_HOPS
         assert_eq!(table.create_sync(&peer3), RouterTableSync(vec![(peer1, (0, 100).into())]));
+    }
+
+    #[test_log::test]
+    fn should_remove_relay_path_after_disconnect() {
+        let mut table = RouterTable::new(PeerId(0));
+
+        let peer1 = PeerId(1);
+        let conn1 = ConnectionId(1);
+
+        let peer2 = PeerId(2);
+
+        table.set_direct(conn1, peer1, 100);
+
+        table.apply_sync(conn1, RouterTableSync(vec![(peer2, (MAX_HOPS, 200).into())]));
+        assert_eq!(table.next_remote(&peer2), Some((conn1, (MAX_HOPS + 1, 300).into())));
+
+        // after disconnect peer1
+        table.del_direct(&conn1);
+
+        // we should not have peer2 anymore
+        assert_eq!(table.next_remote(&peer2), None);
     }
 }
