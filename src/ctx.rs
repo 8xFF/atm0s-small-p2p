@@ -146,7 +146,9 @@ impl SharedCtx {
             }
             RouteAction::Next(next) => {
                 let source = self.router.local_id();
-                self.conn(&next).ok_or(anyhow!("peer not found"))?.try_send(PeerMessage::Unicast(source, dest, service_id, data))?;
+                self.conn(&next)
+                    .ok_or(anyhow!("peer not found {next}"))?
+                    .try_send(PeerMessage::Unicast(source, dest, service_id, data))?;
                 Ok(())
             }
         }
@@ -160,7 +162,10 @@ impl SharedCtx {
             }
             RouteAction::Next(next) => {
                 let source = self.router.local_id();
-                self.conn(&next).ok_or(anyhow!("peer not found"))?.send(PeerMessage::Unicast(source, dest, service_id, data)).await?;
+                self.conn(&next)
+                    .ok_or(anyhow!("peer not found {next}"))?
+                    .send(PeerMessage::Unicast(source, dest, service_id, data))
+                    .await?;
                 Ok(())
             }
         }
@@ -201,7 +206,7 @@ impl SharedCtx {
             }
             RouteAction::Next(next) => {
                 let source = self.router.local_id();
-                Ok(self.conn(&next).ok_or(anyhow!("peer not found"))?.open_stream(service, source, dest, meta).await?)
+                Ok(self.conn(&next).ok_or(anyhow!("peer not found {next}"))?.open_stream(service, source, dest, meta).await?)
             }
         }
     }
