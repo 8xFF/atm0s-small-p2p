@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/8xFF/atm0s-small-p2p/compare/v0.2.1...v0.2.2) - 2024-12-18
+
+### Fixed
+
+- missing clear relayed path when connection closed (#25)
+
 ## [0.2.1](https://github.com/8xFF/atm0s-small-p2p/compare/v0.2.0...v0.2.1) - 2024-11-26
 
 ### Added
