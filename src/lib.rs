@@ -29,6 +29,7 @@ use tokio::{
 
 use crate::quic::make_server_endpoint;
 
+mod cached_map;
 mod ctx;
 mod discovery;
 mod msg;
@@ -219,6 +220,7 @@ impl<SECURE: HandshakeProtocol> P2pNetwork<SECURE> {
     }
 
     fn process_tick(&mut self, now_ms: u64) -> anyhow::Result<P2pNetworkEvent> {
+        self.ctx.on_tick();
         self.discovery.clear_timeout(now_ms);
         for conn in self.neighbours.connected_conns() {
             let peer_id = conn.peer_id().expect("connected neighbours should have peer_id");

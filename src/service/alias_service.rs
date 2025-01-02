@@ -5,7 +5,6 @@ use std::{
 
 use anyhow::anyhow;
 use derive_more::derive::{Display, From};
-use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use tokio::{
     select,
@@ -24,7 +23,6 @@ use crate::{
 
 use super::{P2pService, P2pServiceEvent, P2pServiceRequester};
 
-const LRU_CACHE_SIZE: usize = 1_000_000;
 const HINT_TIMEOUT_MS: u64 = 500;
 const SCAN_TIMEOUT_MS: u64 = 1000;
 
@@ -133,7 +131,7 @@ enum InternalOutput {
 
 struct AliasServiceInternal {
     local: HashMap<AliasId, u8>,
-    cache: LruCache<AliasId, HashSet<PeerId>>,
+    cache: HashMap<AliasId, HashSet<PeerId>>,
     find_reqs: HashMap<AliasId, FindRequest>,
     outs: VecDeque<InternalOutput>,
 }
@@ -154,7 +152,7 @@ impl AliasService {
             tx,
             rx,
             internal: AliasServiceInternal {
-                cache: LruCache::new(LRU_CACHE_SIZE.try_into().expect("")),
+                cache: HashMap::new(),
                 find_reqs: HashMap::new(),
                 outs: VecDeque::new(),
                 local: HashMap::new(),
@@ -259,14 +257,13 @@ impl AliasServiceInternal {
         log::info!("[AliasServiceInternal] on msg from {from}, {msg:?}");
         match msg {
             AliasMessage::NotifySet(alias_id) => {
-                let slot = self.cache.get_or_insert_mut(alias_id, HashSet::new);
-                slot.insert(from);
+                self.cache.entry(alias_id).or_default().insert(from);
             }
             AliasMessage::NotifyDel(alias_id) => {
                 if let Some(slot) = self.cache.get_mut(&alias_id) {
                     slot.remove(&from);
                     if slot.is_empty() {
-                        self.cache.pop(&alias_id);
+                        self.cache.remove(&alias_id);
                     }
                 }
             }
@@ -283,8 +280,7 @@ impl AliasServiceInternal {
                 }
             }
             AliasMessage::Found(alias_id) => {
-                let slot = self.cache.get_or_insert_mut(alias_id, HashSet::new);
-                slot.insert(from);
+                self.cache.entry(alias_id).or_default().insert(from);
 
                 if let Some(req) = self.find_reqs.remove(&alias_id) {
                     let found = if matches!(req.state, FindRequestState::Scan(_)) {
@@ -301,7 +297,7 @@ impl AliasServiceInternal {
                 if let Some(slot) = self.cache.get_mut(&alias_id) {
                     slot.remove(&from);
                     if slot.is_empty() {
-                        self.cache.pop(&alias_id);
+                        self.cache.remove(&alias_id);
                     }
                 }
 
@@ -320,13 +316,10 @@ impl AliasServiceInternal {
                 }
             }
             AliasMessage::Shutdown => {
-                let mut removed_alias_ids = vec![];
-                for (k, _v) in &mut self.cache {
-                    removed_alias_ids.push(*k);
-                }
-                for alias_id in removed_alias_ids {
-                    self.cache.pop(&alias_id);
-                }
+                self.cache.retain(|_, slot| {
+                    slot.remove(&from);
+                    !slot.is_empty()
+                });
             }
         }
     }
@@ -402,7 +395,7 @@ mod test {
             Self {
                 internal: AliasServiceInternal {
                     local: HashMap::new(),
-                    cache: LruCache::new(LRU_CACHE_SIZE.try_into().expect("should create NoneZeroUsize")),
+                    cache: HashMap::new(),
                     find_reqs: HashMap::new(),
                     outs: VecDeque::new(),
                 },
@@ -605,7 +598,7 @@ mod test {
         // Add some data to cache
         let mut peers = HashSet::new();
         peers.insert(peer_addr);
-        ctx.internal.cache.put(alias_id, peers);
+        ctx.internal.cache.insert(alias_id, peers);
 
         // Test shutdown
         ctx.internal.on_control(ctx.now, AliasControl::Shutdown);

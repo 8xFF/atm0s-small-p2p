@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{discovery::PeerDiscoverySync, router::RouterTableSync, PeerId};
 
-#[derive(Debug, Display, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Display, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, Copy, PartialOrd, Ord)]
 pub struct BroadcastMsgId(u64);
 
 #[derive(Debug, Display, PartialEq, Deref, Eq, Hash, Serialize, Deserialize, From, Clone, Copy)]

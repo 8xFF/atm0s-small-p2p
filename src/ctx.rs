@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::anyhow;
-use lru::LruCache;
 use parking_lot::RwLock;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
+    cached_map::CachedMap,
     msg::{BroadcastMsgId, P2pServiceId, PeerMessage},
+    now_ms,
     peer::{PeerConnectionAlias, PeerConnectionMetric},
     router::{RouteAction, SharedRouterTable},
     service::P2pServiceEvent,
@@ -19,7 +20,7 @@ use crate::{
 struct SharedCtxInternal {
     conns: HashMap<ConnectionId, PeerConnectionAlias>,
     conn_metrics: HashMap<ConnectionId, (PeerId, PeerConnectionMetric)>,
-    received_broadcast_msg: LruCache<BroadcastMsgId, ()>,
+    received_broadcast_msg: CachedMap<BroadcastMsgId, ()>,
     services: [Option<Sender<P2pServiceEvent>>; 256],
 }
 
@@ -63,12 +64,16 @@ impl SharedCtxInternal {
         ret
     }
 
+    fn on_tick(&mut self) {
+        self.received_broadcast_msg.refresh(now_ms());
+    }
+
     /// check if we already got the message
     /// if is not, it return true and save to cache list
     /// if already it return false and do nothing
     fn check_broadcast_msg(&mut self, id: BroadcastMsgId) -> bool {
-        if !self.received_broadcast_msg.contains(&id) {
-            self.received_broadcast_msg.get_or_insert(id, || ());
+        if !self.received_broadcast_msg.contains_key(&id) {
+            self.received_broadcast_msg.insert(now_ms(), id, ());
             true
         } else {
             false
@@ -88,7 +93,7 @@ impl SharedCtx {
             ctx: Arc::new(RwLock::new(SharedCtxInternal {
                 conns: Default::default(),
                 conn_metrics: Default::default(),
-                received_broadcast_msg: LruCache::new(8192.try_into().expect("should ok")),
+                received_broadcast_msg: CachedMap::new(10_000, 1_000_000),
                 services: std::array::from_fn(|_| None),
             })),
             router,
@@ -97,6 +102,10 @@ impl SharedCtx {
 
     pub(super) fn set_service(&mut self, service_id: P2pServiceId, tx: Sender<P2pServiceEvent>) {
         self.ctx.write().set_service(service_id, tx);
+    }
+
+    pub fn on_tick(&self) {
+        self.ctx.write().on_tick();
     }
 
     pub fn register_conn(&self, conn: ConnectionId, alias: PeerConnectionAlias) {
