@@ -109,6 +109,7 @@ async fn pubsub_local_multi_subs() {
         timeout(ttl, publisher.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::PeerJoined(PeerSrc::Local)
     );
+    assert!(timeout(ttl, publisher.recv()).await.is_err()); // it should timeout because we don't fire join 2 times
 
     publisher.requester().publish(vec![1, 2, 3]).await.expect("should ok");
     assert_eq!(
@@ -153,6 +154,7 @@ async fn pubsub_local_multi_pubs() {
         timeout(ttl, subscriber.recv()).await.expect("should not timeout").expect("should recv"),
         SubscriberEvent::PeerJoined(PeerSrc::Local)
     );
+    assert!(timeout(ttl, subscriber.recv()).await.is_err()); // it should timeout because we don't fire join 2 times
     assert_eq!(
         timeout(ttl, publisher1.recv()).await.expect("should not timeout").expect("should recv"),
         PublisherEvent::PeerJoined(PeerSrc::Local)

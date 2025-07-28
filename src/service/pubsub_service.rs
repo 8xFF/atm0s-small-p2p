@@ -386,9 +386,11 @@ impl PubsubService {
                     for (_, sub_tx) in state.local_subscribers.iter() {
                         let _ = sub_tx.send(SubscriberEvent::PeerJoined(PeerSrc::Local));
                     }
+                    state.local_publishers.insert(local_id, tx);
+                    self.broadcast(&PubsubMessage::PublisherJoined(channel)).await;
+                } else {
+                    state.local_publishers.insert(local_id, tx);
                 }
-                state.local_publishers.insert(local_id, tx);
-                self.broadcast(&PubsubMessage::PublisherJoined(channel)).await;
             }
             InternalMsg::PublisherDestroyed(local_id, channel) => {
                 log::info!("[PubsubService] local destroyed pub channel {channel} / {local_id}");
@@ -400,8 +402,8 @@ impl PubsubService {
                     for (_, sub_tx) in state.local_subscribers.iter() {
                         let _ = sub_tx.send(SubscriberEvent::PeerLeaved(PeerSrc::Local));
                     }
+                    self.broadcast(&PubsubMessage::PublisherLeaved(channel)).await;
                 }
-                self.broadcast(&PubsubMessage::PublisherLeaved(channel)).await;
             }
             InternalMsg::SubscriberCreated(local_id, channel, tx) => {
                 log::info!("[PubsubService] local created sub channel {channel} / {local_id}");
@@ -415,9 +417,11 @@ impl PubsubService {
                     for (_, pub_tx) in state.local_publishers.iter() {
                         let _ = pub_tx.send(PublisherEvent::PeerJoined(PeerSrc::Local));
                     }
+                    state.local_subscribers.insert(local_id, tx);
+                    self.broadcast(&PubsubMessage::SubscriberJoined(channel)).await;
+                } else {
+                    state.local_subscribers.insert(local_id, tx);
                 }
-                state.local_subscribers.insert(local_id, tx);
-                self.broadcast(&PubsubMessage::SubscriberJoined(channel)).await;
             }
             InternalMsg::SubscriberDestroyed(local_id, channel) => {
                 log::info!("[PubsubService] local destroyed sub channel {channel} / {local_id}");
@@ -428,8 +432,8 @@ impl PubsubService {
                     for (_, pub_tx) in state.local_publishers.iter() {
                         let _ = pub_tx.send(PublisherEvent::PeerLeaved(PeerSrc::Local));
                     }
+                    self.broadcast(&PubsubMessage::SubscriberLeaved(channel)).await;
                 }
-                self.broadcast(&PubsubMessage::SubscriberLeaved(channel)).await;
             }
             InternalMsg::GuestPublish(channel, vec) => {
                 if let Some(state) = self.channels.get(&channel) {
