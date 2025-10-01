@@ -107,16 +107,16 @@ pub enum FetchChangedError {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-pub struct SnapsnotData<K, V> {
+pub struct SnapshotData<K, V> {
     slots: Vec<(K, Slot<V>)>,
     next_key: Option<K>,
-    bigest_key: K,
+    biggest_key: K,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub enum RpcRes<K, V> {
     FetchChanged(Result<Vec<Changed<K, V>>, FetchChangedError>),
-    FetchSnapshot(Option<SnapsnotData<K, V>>, Version),
+    FetchSnapshot(Option<SnapshotData<K, V>>, Version),
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]

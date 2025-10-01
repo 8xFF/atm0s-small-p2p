@@ -140,7 +140,7 @@ where
 #[derive(Debug, PartialEq, Eq)]
 struct SyncFullState<N, K, V> {
     version: Option<Version>,
-    bigest_key: Option<K>,
+    biggest_key: Option<K>,
     sending_req: Option<(Instant, NetEvent<N, K, V>)>,
     _tmp: PhantomData<(N, K, V)>,
 }
@@ -149,7 +149,7 @@ impl<N, K, V> Default for SyncFullState<N, K, V> {
     fn default() -> Self {
         Self {
             version: None,
-            bigest_key: None,
+            biggest_key: None,
             sending_req: None,
             _tmp: PhantomData,
         }
@@ -204,10 +204,10 @@ where
             RpcRes::FetchSnapshot(Some(snapshot), version) => {
                 // TODO check snapshot is not empty
                 log::info!(
-                    "[RemoteStore {:?}] got snapshot {} slots and bigest_key {:?}, current version {version:?}, next {:?}",
+                    "[RemoteStore {:?}] got snapshot {} slots and biggest_key {:?}, current version {version:?}, next {:?}",
                     ctx.remote,
                     snapshot.slots.len(),
-                    snapshot.bigest_key,
+                    snapshot.biggest_key,
                     snapshot.next_key,
                 );
                 for (k, slot) in snapshot.slots.into_iter() {
@@ -216,10 +216,10 @@ where
                 }
                 if self.version.is_none() {
                     self.version = Some(version);
-                    self.bigest_key = Some(snapshot.bigest_key);
+                    self.biggest_key = Some(snapshot.biggest_key);
                 }
                 if let Some(next_key) = snapshot.next_key {
-                    let to = self.bigest_key.clone().expect("should have bigest key");
+                    let to = self.biggest_key.clone().expect("should have biggest key");
                     let max_version = self.version.expect("should have version");
 
                     log::info!(
@@ -407,7 +407,7 @@ where
 mod tests {
     use std::time::Duration;
 
-    use crate::replicate_kv_service::SnapsnotData;
+    use crate::replicate_kv_service::SnapshotData;
 
     use super::*;
 
@@ -446,10 +446,10 @@ mod tests {
             &mut ctx,
             now,
             RpcRes::FetchSnapshot(
-                Some(SnapsnotData {
+                Some(SnapshotData {
                     slots: vec![(1, Slot::new(1, Version(1)))],
                     next_key: None,
-                    bigest_key: 1,
+                    biggest_key: 1,
                 }),
                 Version(1),
             ),
@@ -538,10 +538,10 @@ mod tests {
             &mut ctx,
             now,
             RpcRes::FetchSnapshot(
-                Some(SnapsnotData {
+                Some(SnapshotData {
                     slots: vec![(1, Slot::new(1, Version(1)))],
                     next_key: Some(2),
-                    bigest_key: 2,
+                    biggest_key: 2,
                 }),
                 Version(2),
             ),
@@ -566,10 +566,10 @@ mod tests {
             &mut ctx,
             now,
             RpcRes::FetchSnapshot(
-                Some(SnapsnotData {
+                Some(SnapshotData {
                     slots: vec![(2, Slot::new(2, Version(2)))],
                     next_key: None,
-                    bigest_key: 2,
+                    biggest_key: 2,
                 }),
                 Version(2),
             ),

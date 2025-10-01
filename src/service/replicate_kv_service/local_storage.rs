@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use super::{Action, BroadcastEvent, Changed, Event, FetchChangedError, KvEvent, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, SnapsnotData, Version};
+use super::{Action, BroadcastEvent, Changed, Event, FetchChangedError, KvEvent, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, SnapshotData, Version};
 
 pub struct LocalStore<N, K, V> {
     slots: BTreeMap<K, Slot<V>>,
@@ -91,7 +91,7 @@ where
         Ok(self.changeds.range(from..to).map(|(_, v)| v.clone()).collect())
     }
 
-    fn snapshot(&self, from: Option<K>, to: Option<K>, max_version: Option<Version>) -> Option<SnapsnotData<K, V>> {
+    fn snapshot(&self, from: Option<K>, to: Option<K>, max_version: Option<Version>) -> Option<SnapshotData<K, V>> {
         let first = self.slots.first_key_value().map(|(k, _)| k.clone());
         let last = self.slots.last_key_value().map(|(k, _)| k.clone());
         if let (Some(first), Some(last)) = (first, last) {
@@ -100,7 +100,7 @@ where
             let max_version = max_version.unwrap_or(self.version);
             let mut slots = Vec::new();
             let mut next_key = None;
-            let bigest_key = to.clone();
+            let biggest_key = to.clone();
             for (key, slot) in self.slots.range(from..=to) {
                 if slot.version > max_version {
                     continue;
@@ -111,7 +111,7 @@ where
                 }
                 slots.push((key.clone(), slot.clone()));
             }
-            Some(SnapsnotData { slots, next_key, bigest_key })
+            Some(SnapshotData { slots, next_key, biggest_key })
         } else {
             None
         }
@@ -147,10 +147,10 @@ mod tests {
 
         assert_eq!(
             store.snapshot(None, None, None),
-            Some(SnapsnotData {
+            Some(SnapshotData {
                 slots: vec![(1, Slot { version: Version(1), value: 101 })],
                 next_key: None,
-                bigest_key: 1
+                biggest_key: 1
             })
         );
 
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_mutliple_pkts() {
+    fn snapshot_multiple_pkts() {
         let mut store: LocalStore<u16, u16, u16> = LocalStore::new(2, 2);
         for i in 1..=10 {
             store.set(i, i);
@@ -195,29 +195,29 @@ mod tests {
 
         assert_eq!(
             store.snapshot(None, None, None),
-            Some(SnapsnotData {
+            Some(SnapshotData {
                 slots: vec![(1, Slot { version: Version(1), value: 1 }), (2, Slot { version: Version(2), value: 2 })],
                 next_key: Some(3),
-                bigest_key: 10
+                biggest_key: 10
             })
         );
 
         assert_eq!(
             store.snapshot(Some(3), Some(10), Some(Version(10))),
-            Some(SnapsnotData {
+            Some(SnapshotData {
                 slots: vec![(3, Slot { version: Version(3), value: 3 }), (4, Slot { version: Version(4), value: 4 })],
                 next_key: Some(5),
-                bigest_key: 10
+                biggest_key: 10
             })
         );
 
         // last pkt
         assert_eq!(
             store.snapshot(Some(9), Some(10), Some(Version(10))),
-            Some(SnapsnotData {
+            Some(SnapshotData {
                 slots: vec![(9, Slot { version: Version(9), value: 9 }), (10, Slot { version: Version(10), value: 10 })],
                 next_key: None,
-                bigest_key: 10
+                biggest_key: 10
             })
         );
     }

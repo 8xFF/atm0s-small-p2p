@@ -48,7 +48,7 @@ async fn full_sync() {
     assert_eq!(timeout(WAIT, kv2.recv()).await, Ok(Some(KvEvent::Set(Some(addr1.peer_id()), 3, 3))));
 }
 
-// compose pkt smaller than slots count then FullSync will be splitted to multiple packets
+// compose pkt smaller than slots count then FullSync will be split to multiple packets
 #[test(tokio::test)]
 async fn full_sync2() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
@@ -78,7 +78,7 @@ async fn full_sync2() {
 }
 
 #[test(tokio::test)]
-async fn continuos_sync() {
+async fn contiuous_sync() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let (mut node2, _addr2) = create_node(true, 2, vec![addr1.clone()]).await;
 
