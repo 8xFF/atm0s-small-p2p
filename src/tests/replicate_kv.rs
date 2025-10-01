@@ -78,7 +78,7 @@ async fn full_sync2() {
 }
 
 #[test(tokio::test)]
-async fn contiuous_sync() {
+async fn continuous_sync() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let (mut node2, _addr2) = create_node(true, 2, vec![addr1.clone()]).await;
 
