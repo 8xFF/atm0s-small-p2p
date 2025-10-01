@@ -400,7 +400,7 @@ async fn pubsub_remote_multi_pubs() {
 }
 
 #[test(tokio::test)]
-async fn pubsub_remote_heatbeat_restore() {
+async fn pubsub_remote_heartbeat_restore() {
     let (mut node1, addr1) = create_node(true, 1, vec![]).await;
     let mut service1 = PubsubService::new(node1.create_service(0.into()));
     let service1_requester = service1.requester();

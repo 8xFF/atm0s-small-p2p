@@ -3,7 +3,7 @@
 //! We trying to implement a pubsub service with only Unicast and Broadcast, without any database.
 //! Each time new producer is created or destroyed, it will broadcast to all other nodes, same with new subscriber.
 //!
-//! For avoiding channel state out-of-sync, we add simple heatbeat, each some seconds each node will broadcast a list of active channel with flag publish and subscribe.
+//! For avoiding channel state out-of-sync, we add simple heartbeat, each some seconds each node will broadcast a list of active channel with flag publish and subscribe.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -35,7 +35,7 @@ mod subscriber;
 pub use publisher::{Publisher, PublisherEvent, PublisherEventOb, PublisherRequester};
 pub use subscriber::{Subscriber, SubscriberEvent, SubscriberEventOb, SubscriberRequester};
 
-const HEATBEAT_INTERVAL_MS: u64 = 5_000;
+const HEARTBEAT_INTERVAL_MS: u64 = 5_000;
 const RPC_TICK_INTERVAL_MS: u64 = 1_000;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -54,7 +54,7 @@ impl RpcId {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ChannelHeatbeat {
+struct ChannelHeartbeat {
     channel: PubsubChannelId,
     publish: bool,
     subscribe: bool,
@@ -86,7 +86,7 @@ enum PubsubMessage {
     PublisherLeaved(PubsubChannelId),
     SubscriberJoined(PubsubChannelId),
     SubscriberLeaved(PubsubChannelId),
-    Heatbeat(Vec<ChannelHeatbeat>),
+    Heartbeat(Vec<ChannelHeartbeat>),
     GuestPublish(PubsubChannelId, Vec<u8>),
     GuestPublishRpc(PubsubChannelId, Vec<u8>, RpcId, String),
     Publish(PubsubChannelId, Vec<u8>),
@@ -139,7 +139,7 @@ pub struct PubsubService {
     channels: HashMap<PubsubChannelId, PubsubChannelState>,
     publish_rpc_reqs: HashMap<RpcId, PublishRpcReq>,
     feedback_rpc_reqs: HashMap<RpcId, FeedbackRpcReq>,
-    heatbeat_tick: Interval,
+    heartbeat_tick: Interval,
     rpc_tick: Interval,
 }
 
@@ -153,7 +153,7 @@ impl PubsubService {
             channels: HashMap::new(),
             publish_rpc_reqs: HashMap::new(),
             feedback_rpc_reqs: HashMap::new(),
-            heatbeat_tick: tokio::time::interval(Duration::from_millis(HEATBEAT_INTERVAL_MS)),
+            heartbeat_tick: tokio::time::interval(Duration::from_millis(HEARTBEAT_INTERVAL_MS)),
             rpc_tick: tokio::time::interval(Duration::from_millis(RPC_TICK_INTERVAL_MS)),
         }
     }
@@ -167,8 +167,8 @@ impl PubsubService {
     pub async fn run_loop(&mut self) -> anyhow::Result<()> {
         loop {
             select! {
-                _ = self.heatbeat_tick.tick() => {
-                    self.on_heatbeat_tick().await?;
+                _ = self.heartbeat_tick.tick() => {
+                    self.on_heartbeat_tick().await?;
                 },
                 _ = self.rpc_tick.tick() => {
                     self.on_rpc_tick().await?;
@@ -183,16 +183,16 @@ impl PubsubService {
         }
     }
 
-    async fn on_heatbeat_tick(&mut self) -> anyhow::Result<()> {
-        let mut heatbeat = vec![];
+    async fn on_heartbeat_tick(&mut self) -> anyhow::Result<()> {
+        let mut heartbeat = vec![];
         for (channel, state) in self.channels.iter() {
-            heatbeat.push(ChannelHeatbeat {
+            heartbeat.push(ChannelHeartbeat {
                 channel: *channel,
                 publish: !state.local_publishers.is_empty(),
                 subscribe: !state.local_subscribers.is_empty(),
             });
         }
-        self.broadcast(&PubsubMessage::Heatbeat(heatbeat)).await;
+        self.broadcast(&PubsubMessage::Heartbeat(heartbeat)).await;
         Ok(())
     }
 
@@ -272,10 +272,10 @@ impl PubsubService {
                                 }
                             }
                         }
-                        PubsubMessage::Heatbeat(channels) => {
-                            for heatbeat in channels {
-                                if let Some(state) = self.channels.get_mut(&heatbeat.channel) {
-                                    if heatbeat.publish && !state.remote_publishers.contains(&from_peer) {
+                        PubsubMessage::Heartbeat(channels) => {
+                            for heartbeat in channels {
+                                if let Some(state) = self.channels.get_mut(&heartbeat.channel) {
+                                    if heartbeat.publish && !state.remote_publishers.contains(&from_peer) {
                                         // it we out-of-sync from peer then add it to list then fire event
                                         state.remote_publishers.insert(from_peer);
                                         for (_, sub_tx) in state.local_subscribers.iter() {
@@ -283,7 +283,7 @@ impl PubsubService {
                                         }
                                     }
 
-                                    if heatbeat.subscribe && !state.remote_subscribers.contains(&from_peer) {
+                                    if heartbeat.subscribe && !state.remote_subscribers.contains(&from_peer) {
                                         // it we out-of-sync from peer then add it to list then fire event
                                         state.remote_subscribers.insert(from_peer);
                                         for (_, pub_tx) in state.local_publishers.iter() {
