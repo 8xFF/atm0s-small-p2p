@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use super::{Action, BroadcastEvent, Changed, Event, KvEvent, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, Version};
+use super::messages::{Action, BroadcastEvent, Changed, Event, KvEvent, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, Version};
 
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -285,7 +285,7 @@ where
                     Action::Set(value) => {
                         log::debug!("[RemoteStore {:?}] apply set k {:?} => version {:?}", ctx.remote, data.key, data.version);
                         ctx.outs.push_back(Event::KvEvent(KvEvent::Set(Some(ctx.remote.clone()), data.key.clone(), value.clone())));
-                        ctx.slots.insert(data.key, Slot { version: data.version, value });
+                        ctx.slots.insert(data.key, Slot::new(value, data.version));
                     }
                     Action::Del => {
                         log::debug!("[RemoteStore {:?}] apply del k {:?} => version {:?}", ctx.remote, data.key, data.version);
@@ -407,7 +407,7 @@ where
 mod tests {
     use std::time::Duration;
 
-    use crate::replicate_kv_service::SnapshotData;
+    use super::super::messages::SnapshotData;
 
     use super::*;
 

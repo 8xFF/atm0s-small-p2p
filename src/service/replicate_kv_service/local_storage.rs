@@ -3,7 +3,7 @@ use std::{
     hash::Hash,
 };
 
-use super::{Action, BroadcastEvent, Changed, Event, FetchChangedError, KvEvent, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, SnapshotData, Version};
+use super::messages::{Action, BroadcastEvent, Changed, Event, FetchChangedError, KvEvent, NetEvent, RpcEvent, RpcReq, RpcRes, Slot, SnapshotData, Version};
 
 pub struct LocalStore<N, K, V> {
     slots: BTreeMap<K, Slot<V>>,
@@ -48,7 +48,7 @@ where
         while self.changeds.len() > self.max_changeds {
             self.changeds.pop_first();
         }
-        self.slots.insert(key, Slot { version, value });
+        self.slots.insert(key, Slot::new(value, version));
     }
 
     pub fn del(&mut self, key: K) {
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(
             store.snapshot(None, None, None),
             Some(SnapshotData {
-                slots: vec![(1, Slot { version: Version(1), value: 101 })],
+                slots: vec![(1, Slot::new(101, Version(1)))],
                 next_key: None,
                 biggest_key: 1
             })
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(
             store.snapshot(None, None, None),
             Some(SnapshotData {
-                slots: vec![(1, Slot { version: Version(1), value: 1 }), (2, Slot { version: Version(2), value: 2 })],
+                slots: vec![(1, Slot::new(1, Version(1))), (2, Slot::new(2, Version(2)))],
                 next_key: Some(3),
                 biggest_key: 10
             })
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(
             store.snapshot(Some(3), Some(10), Some(Version(10))),
             Some(SnapshotData {
-                slots: vec![(3, Slot { version: Version(3), value: 3 }), (4, Slot { version: Version(4), value: 4 })],
+                slots: vec![(3, Slot::new(3, Version(3))), (4, Slot::new(4, Version(4)))],
                 next_key: Some(5),
                 biggest_key: 10
             })
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(
             store.snapshot(Some(9), Some(10), Some(Version(10))),
             Some(SnapshotData {
-                slots: vec![(9, Slot { version: Version(9), value: 9 }), (10, Slot { version: Version(10), value: 10 })],
+                slots: vec![(9, Slot::new(9, Version(9))), (10, Slot::new(10, Version(10)))],
                 next_key: None,
                 biggest_key: 10
             })
