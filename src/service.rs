@@ -1,3 +1,5 @@
+use std::task::{Context, Poll};
+
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::{ctx::SharedCtx, msg::P2pServiceId, router::SharedRouterTable, stream::P2pQuicStream, PeerId};
@@ -64,6 +66,10 @@ impl P2pService {
 
     pub fn router(&self) -> &SharedRouterTable {
         self.ctx.router()
+    }
+
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<P2pServiceEvent>> {
+        self.rx.poll_recv(cx)
     }
 
     pub async fn recv(&mut self) -> Option<P2pServiceEvent> {

@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use derive_more::derive::Display;
@@ -68,6 +71,10 @@ impl Publisher {
 
     pub fn requester(&self) -> &PublisherRequester {
         &self.requester
+    }
+
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<PublisherEvent>> {
+        self.pub_rx.poll_recv(cx)
     }
 
     pub async fn recv(&mut self) -> anyhow::Result<PublisherEvent> {
