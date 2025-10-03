@@ -26,6 +26,8 @@ mod peer_internal;
 pub use peer_alias::PeerConnectionAlias;
 pub use peer_internal::PeerConnectionMetric;
 
+const MAX_CONTROL_PEER_PKT: usize = 60000;
+
 enum PeerConnectionControl {
     Send(PeerMessage),
     OpenStream(P2pServiceId, PeerId, PeerId, Vec<u8>, oneshot::Sender<anyhow::Result<P2pQuicStream>>),
@@ -146,8 +148,8 @@ async fn run_connection<SECURE: HandshakeProtocol>(
 ) -> anyhow::Result<()> {
     let to_id = if let PeerConnectionDirection::Outgoing(dest) = direction {
         let auth = secure.create_request(local_id, dest, now_ms());
-        write_object::<_, _, 500>(&mut send, &ConnectReq { from: local_id, to: dest, auth }).await?;
-        let res: ConnectRes = wait_object::<_, _, 500>(&mut recv).await?;
+        write_object::<_, _, MAX_CONTROL_PEER_PKT>(&mut send, &ConnectReq { from: local_id, to: dest, auth }).await?;
+        let res: ConnectRes = wait_object::<_, _, MAX_CONTROL_PEER_PKT>(&mut recv).await?;
         log::info!("{res:?}");
         match res.result {
             Ok(auth) => {
@@ -161,12 +163,12 @@ async fn run_connection<SECURE: HandshakeProtocol>(
             }
         }
     } else {
-        let req: ConnectReq = wait_object::<_, _, 500>(&mut recv).await?;
+        let req: ConnectReq = wait_object::<_, _, MAX_CONTROL_PEER_PKT>(&mut recv).await?;
         if let Err(e) = secure.verify_request(req.auth, req.from, req.to, now_ms()) {
-            write_object::<_, _, 500>(&mut send, &ConnectRes { result: Err(e.clone()) }).await?;
+            write_object::<_, _, MAX_CONTROL_PEER_PKT>(&mut send, &ConnectRes { result: Err(e.clone()) }).await?;
             return Err(anyhow!("destination auth failure: {e}"));
         } else if req.to != local_id {
-            write_object::<_, _, 500>(
+            write_object::<_, _, MAX_CONTROL_PEER_PKT>(
                 &mut send,
                 &ConnectRes {
                     result: Err("destination not match".to_owned()),
@@ -176,7 +178,7 @@ async fn run_connection<SECURE: HandshakeProtocol>(
             return Err(anyhow!("destination wrong"));
         } else {
             let auth = secure.create_response(req.to, req.from, now_ms());
-            write_object::<_, _, 500>(&mut send, &ConnectRes { result: Ok(auth) }).await?;
+            write_object::<_, _, MAX_CONTROL_PEER_PKT>(&mut send, &ConnectRes { result: Ok(auth) }).await?;
             req.from
         }
     };
