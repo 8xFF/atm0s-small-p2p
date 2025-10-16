@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/8xFF/atm0s-small-p2p/compare/v0.2.2...v0.2.3) - 2025-10-16
+
+### Added
+
+- add metrics ([#31](https://github.com/8xFF/atm0s-small-p2p/pull/31))
+- implement replicated key-value store with node-local ownership ([#24](https://github.com/8xFF/atm0s-small-p2p/pull/24))
+
+### Fixed
+
+- panic unicast  ([#36](https://github.com/8xFF/atm0s-small-p2p/pull/36))
+- pubsub service should only fire single ever per peer ([#32](https://github.com/8xFF/atm0s-small-p2p/pull/32))
+
 ## [0.2.2](https://github.com/8xFF/atm0s-small-p2p/compare/v0.2.1...v0.2.2) - 2024-12-18
 
 ### Fixed
